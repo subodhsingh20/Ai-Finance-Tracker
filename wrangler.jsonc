@@ -1,0 +1,10 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ai-finance-tracker",
+  "compatibility_date": "2026-10-26",
+  "compatibility_flags": ["nodejs_compat"],
+  "main": "worker/index.ts",
+  "ai": { "binding": "AI" },
+  "vars": { "AI_MODEL": "@cf/meta/llama-3.2-3b-instruct" },
+  "upload_source_maps": true
+}

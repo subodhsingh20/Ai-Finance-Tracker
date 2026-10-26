@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.wrangler/
+supabase/.temp/
+.dev.vars
+.env.local
+.env.*.local
+coverage/
+*.tsbuildinfo
