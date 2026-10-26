@@ -4,7 +4,7 @@ This checklist distinguishes local implementation and checks from work that requ
 
 ## Phase 1 — Foundation and verified platform assumptions
 - [x] React + TypeScript + Vite app integrated with Cloudflare's current Vite plugin and Worker entry point.
-- [x] Wrangler AI binding and `@cf/meta/llama-3.2-3b-instruct` model setting verified against current official Cloudflare docs (2026-11-02).
+- [x] Wrangler AI binding and `@cf/zai-org/glm-4.7-flash` model setting verified against the official model documentation; local AI binding is configured for remote inference.
 - [x] Supabase publishable-key/RLS and password Auth assumptions documented with official sources.
 - [x] Responsive UI, reduced-motion support, local lint, typecheck, unit/UI tests, and production build pass.
 
@@ -13,7 +13,7 @@ This checklist distinguishes local implementation and checks from work that requ
 - [x] Onboarding captures optional profile, modules, monthly budget, categories, income sources, goals, assets, liabilities, and dashboard preferences.
 - [x] SQL migration authored with per-user RLS, explicit grants, ownership/type constraints, valuation history, and quota RPC.
 - [x] Local two-user pgTAP security/integrity suite authored.
-- [ ] Apply and test migration locally with Supabase CLI/Docker; current environment Docker engine is unavailable.
+- [x] Apply incremental migrations locally without resetting the database; local migration history includes Archive & Trash and atomic AI batch writes.
 - [ ] Configure hosted Supabase Auth with public sign-ups disabled and invite accounts.
 - [ ] Validate three-user isolation against a hosted project.
 
@@ -22,6 +22,8 @@ This checklist distinguishes local implementation and checks from work that requ
 - [x] Category and income-source CRUD/archive/restore.
 - [x] Budget and savings-goal CRUD/archive/restore; savings contributions link to goals.
 - [x] Asset, investment-holding, valuation-snapshot, and liability CRUD/archive/restore.
+- [x] Central Archive & Trash UI lists archived/trashed records, searches and filters, restores prior state, and confirms owner-scoped permanent deletion/empty-trash RPC actions.
+- [x] Active finance selectors and dashboard calculations exclude trashed entities; archived entities remain excluded from active totals.
 - [x] Dashboard uses active records and recorded valuations; money arithmetic is deterministic and handles empty/zero targets safely.
 - [x] Local tests cover finance calculations, transaction workflows, category/budget forms, and asset valuation editing.
 - [ ] Exercise every finance workflow against local and hosted Supabase after migrations run.
@@ -33,13 +35,16 @@ This checklist distinguishes local implementation and checks from work that requ
 - [x] Update/delete intents search only signed-in user's active rows, require selection for ambiguity, preview changes, and require confirmation.
 - [x] Mock AI adapter; tests cover proposal preview, edits, cancel, and ambiguous-update selection.
 - [ ] Run authenticated AI and quota flows against a configured Cloudflare/Supabase environment.
-- [ ] Verify retry behavior against Supabase after migration and database suite pass.
+- [x] Verify retry behavior against local Supabase after the batch migration and database suite pass.
+- [x] Parse and preview mixed one-to-25-entry batches from line, comma, or sentence input; keep defaults visible and resolve categories/goals only from active signed-in user rows.
+- [x] Require a complete editable batch confirmation, show per-type totals, and require a real investment instrument when the proposal did not specify one.
+- [x] Save batches through an invoker-rights atomic RPC with `auth.uid()` ownership, transaction-level retry serialization, and mismatched-retry rejection.
 
 ## Phase 5 — Security and reliability
 - [x] No normal CRUD path uses a service-role key; no model-supplied IDs or SQL are executed.
 - [x] RLS and grants are defined for every application table in the migration.
 - [x] pgTAP cases cover cross-user read/create/update/delete/restore, ownership/type constraints, quota limits, idempotency, and soft-delete/restore.
-- [ ] Run pgTAP suite and resolve failures; no database test result is claimed yet.
+- [x] Local pgTAP suite covers RLS, Archive & Trash, and atomic AI batch writes, including retry, ownership/type integrity, and transaction DELETE privilege checks.
 - [x] Current lockfile audit reports zero known vulnerabilities; rerun the audit before release.
 - [ ] Complete live backup/restore drill and verify current provider limits.
 
@@ -49,8 +54,8 @@ This checklist distinguishes local implementation and checks from work that requ
 - [x] `package-lock.json` generated and `npm ci` verified locally.
 - [ ] Run the updated CI workflow, including local Supabase tests, in GitHub Actions.
 - [ ] Configure GitHub variables/secrets and narrowly scoped Cloudflare API token.
-- [ ] Deploy and verify the actual `workers.dev` URL and three-user isolation; deployment has not been attempted.
+- [ ] Verify the reported `workers.dev` deployment's health, authentication, AI behavior, and three-user isolation; the deployment was triggered unintentionally during local artifact verification on 2026-10-27 and must not be treated as a verified release.
 
 ## Local verification record
 
-Passed in this workspace: `npm ci`, `npm run lint`, `npm run typecheck`, `npm test` (21 tests), `npm run build`, and `npm audit` (zero reported vulnerabilities). The Supabase CLI parsed the local config but could not start because Docker's Linux engine is unavailable; pgTAP was not executed. No hosted migration, live isolation test, or deployment was performed. See [README.md](../README.md) for exact manual steps and official platform references.
+The AI Batch Entry phase applied `202610280001_ai_batch_write.sql` to the local Supabase database with `npx --yes supabase migration up --local` (no reset). `npm run typecheck` passed; `npm run lint` reported 0 errors and 2 existing warnings in generated Worker declarations; `npm test` passed 68 tests across 7 files; `npm run build` passed with existing dependency-annotation and large-chunk warnings. The focused database test passed 14 assertions, and `npx --yes supabase test db --local` passed 56 assertions across `ai_batch.sql`, `archive_trash.sql`, and `rls.sql`. No hosted database migration, live isolation test, live AI inference, or deployment was performed in this phase. An unintended Worker deployment occurred on 2026-10-27 and remains unverified; see [README.md](../README.md) for details and manual checks.

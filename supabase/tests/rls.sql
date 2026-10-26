@@ -1,5 +1,5 @@
 begin;
-select plan(18);
+select plan(20);
 
 insert into auth.users(
   id, aud, role, email, encrypted_password, email_confirmed_at,
@@ -7,6 +7,14 @@ insert into auth.users(
 ) values
   ('00000000-0000-0000-0000-000000000001','authenticated','authenticated','ledger-a@example.test','',now(),'{"provider":"email","providers":["email"]}','{}',now(),now()),
   ('00000000-0000-0000-0000-000000000002','authenticated','authenticated','ledger-b@example.test','',null,'{"provider":"email","providers":["email"]}','{}',now(),now());
+
+insert into public.categories(id, user_id, type, name)
+values (
+  '10000000-0000-0000-0000-000000000004',
+  '00000000-0000-0000-0000-000000000002',
+  'expense',
+  'Foreign ownership test'
+);
 
 insert into public.transactions(
   id, user_id, type, amount, category_id, description, occurred_on,
@@ -47,19 +55,39 @@ select throws_ok(
     values('00000000-0000-0000-0000-000000000002','expense',10,'00000000-0000-0000-0000-000000000000','cross-user insert',current_date,'manual','20000000-0000-0000-0000-000000000004',0)$$,
   '42501',null,'user cannot create a row for another account'
 );
-select is((with changed as (
-  update public.transactions set description='attempted cross-user update'
-  where id='10000000-0000-0000-0000-000000000002' returning id
-) select count(*)::int from changed),0,'user cannot update another account transaction');
+select lives_ok(
+  $$update public.transactions set description='attempted cross-user update'
+    where id='10000000-0000-0000-0000-000000000002'$$,
+  'cross-user update request completes without exposing the target row'
+);
+reset role;
+select is(
+  (select count(*)::int from public.transactions
+   where id='10000000-0000-0000-0000-000000000002' and description='User B active'),
+  1,
+  'RLS leaves another account transaction unchanged after an update attempt'
+);
+set local role authenticated;
+select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000001',true);
 select throws_ok($$delete from public.transactions where id='10000000-0000-0000-0000-000000000002'$$,'42501',null,'clients cannot hard-delete transactions');
-select is((with restored as (
-  update public.transactions set deleted_at=null
-  where id='10000000-0000-0000-0000-000000000003' returning id
-) select count(*)::int from restored),0,'user cannot restore another account transaction');
+select lives_ok(
+  $$update public.transactions set deleted_at=null
+    where id='10000000-0000-0000-0000-000000000003'$$,
+  'cross-user restore request completes without exposing the target row'
+);
+reset role;
+select is(
+  (select count(*)::int from public.transactions
+   where id='10000000-0000-0000-0000-000000000003' and deleted_at is not null),
+  1,
+  'RLS leaves another account transaction in Trash after a restore attempt'
+);
+set local role authenticated;
+select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000001',true);
 select throws_ok(
   $$insert into public.transactions(user_id,type,amount,category_id,description,occurred_on,created_via,submission_id,submission_item_index)
     values('00000000-0000-0000-0000-000000000001','expense',10,
-      (select id from public.categories where user_id='00000000-0000-0000-0000-000000000002' and type='expense' limit 1),
+      '10000000-0000-0000-0000-000000000004',
       'foreign category',current_date,'manual','20000000-0000-0000-0000-000000000005',0)$$,
   '23503',null,'category foreign key enforces composite ownership'
 );

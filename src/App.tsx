@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import type { Session } from '@supabase/supabase-js'
-import { Activity, ArrowDownLeft, ArrowUpRight, Bot, BriefcaseBusiness, CalendarDays, ChartNoAxesCombined, CircleHelp, CreditCard, Home, LogOut, Plus, Settings2, ShieldCheck, Sparkles, Wallet, X } from 'lucide-react'
+import { Activity, Archive, ArrowDownLeft, ArrowUpRight, Bot, BriefcaseBusiness, CalendarDays, ChartNoAxesCombined, CircleHelp, CreditCard, Home, LogOut, Plus, Settings2, ShieldCheck, Sparkles, Wallet, X } from 'lucide-react'
 import { Area, AreaChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis } from 'recharts'
 import { FinancePages, TransactionDialog, type AssetDraft, type AssetRow, type BudgetDraft, type BudgetRow, type CategoryRow, type GoalDraft, type GoalRow, type HoldingDraft, type HoldingRow, type IncomeSourceRow, type LiabilityDraft, type LiabilityRow, type TransactionDraft, type TransactionRow, type TransactionType } from './components/FinancePages'
+import { ArchiveTrashPage, type ArchiveTrashRecord } from './components/ArchiveTrashPage'
 import { createAiAdapter, validateAiProposal, type AiProposal } from './lib/ai'
+import { resolveAiBatchItems, type ResolvedAiItem } from './lib/ai-batch'
 import { addMoney, goalProgress, monthBoundsInKolkata, netWorth, rupees, summarize } from './lib/finance'
 import { supabase } from './lib/supabase'
 
@@ -30,8 +32,14 @@ const navItems = [
   { label: 'Investments', icon: BriefcaseBusiness, module: 'investments' },
   { label: 'Assets & debts', icon: CreditCard, module: 'assets' },
   { label: 'Categories & sources', icon: Settings2, module: 'categories' },
+  { label: 'Archive & Trash', icon: Archive, module: 'archive-trash' },
 ]
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date())
+const validDate = (value: string) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const parsed = new Date(`${value}T00:00:00.000Z`)
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value
+}
 const currentMonth = () => today().slice(0, 7)
 const csvColors = ['#54d8b4', '#f28496', '#88aefb', '#e9c47b', '#bd9cf4', '#75cbd5']
 const defaultModules = ['overview', 'transactions', 'budgets', 'savings', 'investments', 'assets', 'categories']
@@ -57,6 +65,7 @@ export default function App() {
   const [assetValues, setAssetValues] = useState<Map<string, number>>(new Map())
   const [holdingValues, setHoldingValues] = useState<Map<string, number>>(new Map())
   const [loading, setLoading] = useState(false)
+  const [signingOut, setSigningOut] = useState(false)
   const [page, setPage] = useState('Overview')
   const [transactionEditor, setTransactionEditor] = useState<{ initial?: Partial<TransactionDraft>; transaction?: TransactionRow } | null>(null)
   const [aiOpen, setAiOpen] = useState(false)
@@ -64,6 +73,26 @@ export default function App() {
   const month = useMemo(() => monthBoundsInKolkata(), [])
   const activeTransactions = useMemo(() => transactions.filter((item) => !item.deleted_at), [transactions])
   const monthTransactions = useMemo(() => activeTransactions.filter((item) => item.occurred_on >= month.start && item.occurred_on <= month.end), [activeTransactions, month])
+
+  function clearSignedInState() {
+    setSession(null)
+    setProfile(null)
+    setTransactions([])
+    setCategories([])
+    setBudgets([])
+    setGoals([])
+    setAssets([])
+    setHoldings([])
+    setLiabilities([])
+    setIncomeSources([])
+    setAssetValues(new Map())
+    setHoldingValues(new Map())
+    setPage('Overview')
+    setMobileOpen(false)
+    setAiOpen(false)
+    setTransactionEditor(null)
+    setError('')
+  }
 
   useEffect(() => {
     if (!supabase) return
@@ -82,17 +111,7 @@ export default function App() {
       setSession(nextSession)
       setError('')
       if (!nextSession) {
-        setProfile(null)
-        setTransactions([])
-        setCategories([])
-        setBudgets([])
-        setGoals([])
-        setAssets([])
-        setHoldings([])
-        setLiabilities([])
-        setIncomeSources([])
-        setAssetValues(new Map())
-        setHoldingValues(new Map())
+        clearSignedInState()
       }
     })
     return () => {
@@ -107,13 +126,13 @@ export default function App() {
     try {
       const [profileResult, categoryResult, budgetResult, goalResult, assetResult, holdingResult, liabilityResult, sourceResult, assetValueResult, holdingValueResult, transactionRows] = await Promise.all([
         supabase.from('profiles').select('display_name,onboarding_completed,enabled_modules,dashboard_preferences').eq('id', session.user.id).maybeSingle(),
-        supabase.from('categories').select('id,type,name,archived_at').order('type').order('name'),
-        supabase.from('budgets').select('id,category_id,month_start,limit_amount,archived_at,categories(name)').order('month_start', { ascending: false }),
-        supabase.from('savings_goals').select('id,name,target_amount,target_date,archived_at').order('created_at', { ascending: false }),
-        supabase.from('assets').select('id,name,category,current_value,as_of_date,description,archived_at').order('name'),
-        supabase.from('investment_holdings').select('id,name,instrument_type,symbol,quantity,current_value,as_of_date,notes,archived_at').order('name'),
-        supabase.from('liabilities').select('id,name,category,outstanding_balance,as_of_date,due_date,notes,archived_at').order('name'),
-        supabase.from('income_sources').select('id,name,archived_at').order('name'),
+        supabase.from('categories').select('id,type,name,archived_at,deleted_at,trashed_from_archived_at').order('type').order('name'),
+        supabase.from('budgets').select('id,category_id,month_start,limit_amount,archived_at,deleted_at,trashed_from_archived_at,categories(name)').order('month_start', { ascending: false }),
+        supabase.from('savings_goals').select('id,name,target_amount,target_date,archived_at,deleted_at,trashed_from_archived_at').order('created_at', { ascending: false }),
+        supabase.from('assets').select('id,name,category,current_value,as_of_date,description,archived_at,deleted_at,trashed_from_archived_at').order('name'),
+        supabase.from('investment_holdings').select('id,name,instrument_type,symbol,quantity,current_value,as_of_date,notes,archived_at,deleted_at,trashed_from_archived_at').order('name'),
+        supabase.from('liabilities').select('id,name,category,outstanding_balance,as_of_date,due_date,notes,archived_at,deleted_at,trashed_from_archived_at').order('name'),
+        supabase.from('income_sources').select('id,name,archived_at,deleted_at,trashed_from_archived_at').order('name'),
         supabase.from('asset_valuations').select('asset_id,value,as_of_date,recorded_at').order('as_of_date', { ascending: false }).order('recorded_at', { ascending: false }),
         supabase.from('holding_valuations').select('holding_id,value,as_of_date,recorded_at').order('as_of_date', { ascending: false }).order('recorded_at', { ascending: false }),
         fetchTransactions(),
@@ -164,25 +183,37 @@ export default function App() {
     }
   }
 
-  async function commit(operation: () => Promise<void>, message: string) {
+  async function commit(operation: () => Promise<void>, message: string, reportError = true, showToast = true) {
     try {
       await operation()
       await refreshData()
-      setToast(message)
-      window.setTimeout(() => setToast(''), 2800)
+      if (showToast) {
+        setToast(message)
+        window.setTimeout(() => setToast(''), 2800)
+      }
     } catch (failure) {
-      setError(errorText(failure))
+      if (reportError) setError(errorText(failure))
       throw failure
     }
   }
 
   async function signOut() {
     if (!supabase) return
+    if (signingOut) return
+    setSigningOut(true)
     try {
       const result = await supabase.auth.signOut()
-      if (result.error) setError(result.error.message)
+      if (result.error) {
+        setError(`Could not sign out: ${result.error.message}`)
+        setMobileOpen(false)
+        return
+      }
+      clearSignedInState()
     } catch (failure) {
-      setError(errorText(failure))
+      setError(`Could not sign out: ${errorText(failure)}`)
+      setMobileOpen(false)
+    } finally {
+      setSigningOut(false)
     }
   }
 
@@ -193,7 +224,7 @@ export default function App() {
 
   async function saveTransaction(draft: TransactionDraft, id?: string) {
     const { client, userId } = requireClient()
-    const category = categories.find((item) => item.id === draft.category_id && item.type === draft.type && !item.archived_at)
+    const category = categories.find((item) => item.id === draft.category_id && item.type === draft.type && !item.archived_at && !item.deleted_at)
     if (!category) throw new Error(`Choose an active ${draft.type} category before saving.`)
     const payload = {
         ...draft,
@@ -219,54 +250,39 @@ export default function App() {
   }
 
   async function saveAiBatch(items: Array<{ draft: TransactionDraft; index: number }>, submissionId: string) {
-    const { client, userId } = requireClient()
+    const { client } = requireClient()
     const rows = items.map(({ draft, index }) => {
-      const category = categories.find((item) => item.id === draft.category_id && item.type === draft.type && !item.archived_at)
+      const category = categories.find((item) => item.id === draft.category_id && item.type === draft.type && !item.archived_at && !item.deleted_at)
       if (!category) throw new Error(`Choose an active ${draft.type} category for every proposed row.`)
+      const source = draft.type === 'income' && draft.income_source_id
+        ? incomeSources.find((item) => item.id === draft.income_source_id && !item.archived_at && !item.deleted_at)
+        : undefined
+      if (draft.income_source_id && !source) throw new Error('Choose an active income source owned by your account.')
+      const goal = draft.type === 'savings' && draft.savings_goal_id
+        ? goals.find((item) => item.id === draft.savings_goal_id && !item.archived_at && !item.deleted_at)
+        : undefined
+      if (draft.savings_goal_id && !goal) throw new Error('Choose an active savings goal owned by your account.')
       return {
-        ...draft,
+        type: draft.type,
+        amount: draft.amount,
+        category_id: draft.category_id,
+        description: draft.description,
+        occurred_on: draft.occurred_on,
+        income_source_id: draft.type === 'income' ? draft.income_source_id : null,
+        source_name: draft.source_name,
+        merchant_name: draft.merchant_name,
+        instrument_name: draft.instrument_name ?? null,
         savings_goal_id: draft.type === 'savings' ? draft.savings_goal_id : null,
-        user_id: userId,
-        created_via: 'AI',
-        submission_id: submissionId,
         submission_item_index: index,
       }
     })
     await commit(async () => {
-      const readSubmission = () => client.from('transactions')
-        .select('submission_item_index,type,amount,category_id,description,occurred_on,income_source_id,source_name,merchant_name,savings_goal_id')
-        .eq('submission_id', submissionId)
-      const matchesSubmission = (existing: Awaited<ReturnType<typeof readSubmission>>['data']) => {
-        if (!existing) return false
-        const expected = new Map(rows.map((row) => [row.submission_item_index, row]))
-        return existing.length === rows.length && existing.every((row) => {
-          const next = expected.get(row.submission_item_index)
-          return next !== undefined
-            && row.type === next.type
-            && Number(row.amount) === next.amount
-            && row.category_id === next.category_id
-            && row.description === next.description
-            && row.occurred_on === next.occurred_on
-            && row.income_source_id === next.income_source_id
-            && row.source_name === next.source_name
-            && row.merchant_name === next.merchant_name
-            && row.savings_goal_id === next.savings_goal_id
-        })
-      }
-      const existing = await readSubmission()
-      if (existing.error) throw existing.error
-      if (existing.data?.length) {
-        if (!matchesSubmission(existing.data)) throw new Error('This submission ID already has different saved rows. Cancel this preview and check your transactions before starting a new entry.')
-        return
-      }
-      const result = await client.from('transactions').upsert(rows, {
-        onConflict: 'user_id,submission_id,submission_item_index',
-        ignoreDuplicates: true,
+      const result = await client.rpc('create_ai_transaction_batch', {
+        p_submission_id: submissionId,
+        p_items: rows,
       })
       if (result.error) throw result.error
-      const saved = await readSubmission()
-      if (saved.error) throw saved.error
-      if (!matchesSubmission(saved.data)) throw new Error('Could not verify all saved rows for this AI submission. Refresh transactions before retrying.')
+      if (result.data !== rows.length) throw new Error('The database did not confirm the complete AI batch.')
     }, `${items.length} AI-proposed ${items.length === 1 ? 'transaction' : 'transactions'} saved`)
   }
 
@@ -364,10 +380,75 @@ export default function App() {
   async function archive(table: string, id: string, archived: boolean, title: string) {
     const { client } = requireClient()
     await commit(async () => {
-      const result = await client.from(table).update({ archived_at: archived ? new Date().toISOString() : null }).eq('id', id).select('id').maybeSingle()
+      const result = await client.from(table).update({ archived_at: archived ? new Date().toISOString() : null }).eq('id', id).is('deleted_at', null).select('id').maybeSingle()
       if (result.error) throw result.error
       if (!result.data) throw new Error(`${title} was not updated. Refresh and try again.`)
     }, `${title} ${archived ? 'archived' : 'restored'}`)
+  }
+
+  async function restoreArchivedRecord(record: ArchiveTrashRecord) {
+    if (record.table === 'transactions') throw new Error('Transactions cannot be archived.')
+    const { client, userId } = requireClient()
+    await commit(async () => {
+      const result = await client.from(record.table).update({ archived_at: null })
+        .eq('id', record.id).eq('user_id', userId).is('deleted_at', null).not('archived_at', 'is', null)
+        .select('id').maybeSingle()
+      if (result.error) throw result.error
+      if (!result.data) throw new Error('That archived record changed elsewhere. Refresh and try again.')
+    }, `${record.type} restored`, false, false)
+  }
+
+  async function moveArchivedRecordToTrash(record: ArchiveTrashRecord) {
+    if (record.table === 'transactions') throw new Error('Transactions cannot be archived.')
+    const { client, userId } = requireClient()
+    await commit(async () => {
+      const result = await client.from(record.table).update({ deleted_at: new Date().toISOString() })
+        .eq('id', record.id).eq('user_id', userId).is('deleted_at', null).not('archived_at', 'is', null)
+        .select('id').maybeSingle()
+      if (result.error) throw result.error
+      if (!result.data) throw new Error('That archived record changed elsewhere. Refresh and try again.')
+    }, `${record.type} moved to Trash`, false, false)
+  }
+
+  async function restoreTrashedRecord(record: ArchiveTrashRecord) {
+    if (record.table === 'transactions') {
+      await setDeleted(record.id, false)
+      return
+    }
+    const { client, userId } = requireClient()
+    await commit(async () => {
+      const result = await client.from(record.table).update({ deleted_at: null })
+        .eq('id', record.id).eq('user_id', userId).not('deleted_at', 'is', null)
+        .select('id').maybeSingle()
+      if (result.error) throw result.error
+      if (!result.data) throw new Error('That trashed record changed elsewhere. Refresh and try again.')
+    }, `${record.type} restored`, false, false)
+  }
+
+  async function permanentlyDeleteRecord(record: ArchiveTrashRecord) {
+    const { client } = requireClient()
+    await commit(async () => {
+      const result = await client.rpc('permanently_delete_trashed_record', {
+        p_record_type: record.table,
+        p_record_id: record.id,
+      })
+      if (result.error) throw result.error
+      if (result.data !== true) throw new Error('This record is no longer in your Trash or cannot be permanently deleted.')
+    }, `${record.type} permanently deleted`, false, false)
+  }
+
+  async function emptyTrash() {
+    const { client } = requireClient()
+    let deletedCount = 0
+    await commit(async () => {
+      const result = await client.rpc('empty_current_user_trash')
+      if (result.error) throw result.error
+      if (typeof result.data !== 'number' || !Number.isSafeInteger(result.data) || result.data < 0) {
+        throw new Error('The database returned an invalid Trash deletion count.')
+      }
+      deletedCount = result.data
+    }, 'Trash emptied', false, false)
+    return deletedCount
   }
 
   async function saveProfile(displayName: string, enabledModules: string[], dashboardPreferences: Record<string, boolean>) {
@@ -455,17 +536,20 @@ export default function App() {
   if (profile && !profile.onboarding_completed) return <Onboarding onComplete={completeOnboarding} onSignOut={() => void signOut()} error={error} />
 
   const activeModules = profile?.enabled_modules ?? defaultModules
-  const visibleNav = navItems.filter(({ label, module }) => label === 'Overview' || activeModules.includes(module))
+  const visibleNav = navItems.filter(({ label, module }) => label === 'Overview' || label === 'Archive & Trash' || activeModules.includes(module))
 
   return <div className="app-shell">
     <aside className={`sidebar ${mobileOpen ? 'open' : ''}`}>
       <a className="brand" href="#overview"><span className="brand-mark"><Wallet size={20} /></span><span>ledger<span className="brand-dot">.</span><small>PERSONAL FINANCE</small></span></a>
       <div className="workspace-label">WORKSPACE</div>
-      <nav aria-label="Main navigation">{visibleNav.map(({ label, icon: Icon }) => <button key={label} className={`nav-item ${page === label ? 'selected' : ''}`} aria-current={page === label ? 'page' : undefined} onClick={() => { setPage(label); setMobileOpen(false) }}><Icon size={18} /><span>{label}</span>{label === 'Transactions' && <span className="nav-count">{activeTransactions.length}</span>}</button>)}</nav>
-      <div className="side-bottom"><div className="side-tip"><span className="tip-icon"><Sparkles size={16} /></span><b>A calmer way to track</b><p>Only your active, signed-in financial records appear here.</p></div>
-        <button className={`nav-item ${page === 'Settings' ? 'selected' : ''}`} onClick={() => { setPage('Settings'); setMobileOpen(false) }}><Settings2 size={18} /><span>Settings</span></button>
-        <button className="nav-item" onClick={() => { setPage('Help & privacy'); setMobileOpen(false) }}><CircleHelp size={18} /><span>Help & privacy</span></button>
-        <div className="profile"><div className="avatar">{(profile?.display_name ?? session.user.email ?? 'U')[0]?.toUpperCase()}</div><div className="profile-text"><b>{profile?.display_name || session.user.email}</b><small>Invited personal account</small></div><SignOutButton onSignOut={() => void signOut()} /></div>
+      <nav className="sidebar-nav" aria-label="Main navigation">
+        {visibleNav.map(({ label, icon: Icon }) => <button key={label} className={`nav-item ${page === label ? 'selected' : ''}`} aria-current={page === label ? 'page' : undefined} onClick={() => { setPage(label); setMobileOpen(false) }}><Icon size={18} /><span>{label}</span>{label === 'Transactions' && <span className="nav-count">{activeTransactions.length}</span>}</button>)}
+        <button className={`nav-item ${page === 'Settings' ? 'selected' : ''}`} aria-current={page === 'Settings' ? 'page' : undefined} onClick={() => { setPage('Settings'); setMobileOpen(false) }}><Settings2 size={18} /><span>Settings</span></button>
+        <button className={`nav-item ${page === 'Help & privacy' ? 'selected' : ''}`} aria-current={page === 'Help & privacy' ? 'page' : undefined} onClick={() => { setPage('Help & privacy'); setMobileOpen(false) }}><CircleHelp size={18} /><span>Help & privacy</span></button>
+      </nav>
+      <div className="side-bottom">
+        <div className="side-tip"><span className="tip-icon"><Sparkles size={16} /></span><b>A calmer way to track</b><p>Only your active, signed-in financial records appear here.</p></div>
+        <div className="profile"><div className="avatar">{(profile?.display_name ?? session.user.email ?? 'U')[0]?.toUpperCase()}</div><div className="profile-text"><b>{profile?.display_name || session.user.email}</b><small>Invited personal account</small></div><SignOutButton onSignOut={() => void signOut()} disabled={signingOut} /></div>
       </div>
     </aside>
     {mobileOpen && <button className="scrim" aria-label="Close navigation" onClick={() => setMobileOpen(false)} />}
@@ -479,6 +563,23 @@ export default function App() {
           ? <Dashboard transactions={monthTransactions} categories={categories} budgets={budgets} goals={goals} holdings={holdings} assets={assets} liabilities={liabilities} assetValues={assetValues} holdingValues={holdingValues} preferences={profile?.dashboard_preferences ?? defaultDashboardPreferences} onAdd={() => setTransactionEditor({})} onPage={setPage} />
           : page === 'Help & privacy'
             ? <HelpPage />
+            : page === 'Archive & Trash'
+              ? <ArchiveTrashPage
+                transactions={transactions}
+                categories={categories}
+                budgets={budgets}
+                goals={goals}
+                assets={assets}
+                holdings={holdings}
+                liabilities={liabilities}
+                incomeSources={incomeSources}
+                loading={loading}
+                onRestoreArchived={restoreArchivedRecord}
+                onMoveToTrash={moveArchivedRecordToTrash}
+                onRestoreTrashed={restoreTrashedRecord}
+                onPermanentlyDelete={permanentlyDeleteRecord}
+                onEmptyTrash={emptyTrash}
+              />
             : <FinancePages
               page={page}
               transactions={transactions}
@@ -570,15 +671,15 @@ function Dashboard({ transactions, categories, budgets, goals, holdings, assets,
   const daily = [...cashFlowByDate.values()].sort((a, b) => a.date.localeCompare(b.date))
   const categoryData = [...expensesByCategory].map(([name, value]) => ({ name, value }))
   const spending = transactions.filter((item) => item.type === 'expense').reduce((sum, item) => addMoney(sum, Number(item.amount)), 0)
-  const currentBudgets = budgets.filter((item) => !item.archived_at && item.month_start === monthBoundsInKolkata().start)
-  const activeGoals = goals.filter((item) => !item.archived_at)
+  const currentBudgets = budgets.filter((item) => !item.archived_at && !item.deleted_at && item.month_start === monthBoundsInKolkata().start)
+  const activeGoals = goals.filter((item) => !item.archived_at && !item.deleted_at)
   const goalSummaries = activeGoals.map((goal) => {
     const contributed = transactions.filter((item) => item.type === 'savings' && item.savings_goal_id === goal.id).reduce((sum, item) => addMoney(sum, Number(item.amount)), 0)
     return { goal, contributed, progress: goalProgress(contributed, Number(goal.target_amount)) }
   })
-  const currentAssets = assets.filter((asset) => !asset.archived_at).reduce((sum, asset) => addMoney(sum, assetValues.get(asset.id) ?? 0), 0)
-  const currentHoldings = holdings.filter((holding) => !holding.archived_at).reduce((sum, holding) => addMoney(sum, holdingValues.get(holding.id) ?? 0), 0)
-  const currentLiabilities = liabilities.filter((item) => !item.archived_at).reduce((sum, item) => addMoney(sum, Number(item.outstanding_balance)), 0)
+  const currentAssets = assets.filter((asset) => !asset.archived_at && !asset.deleted_at).reduce((sum, asset) => addMoney(sum, assetValues.get(asset.id) ?? 0), 0)
+  const currentHoldings = holdings.filter((holding) => !holding.archived_at && !holding.deleted_at).reduce((sum, holding) => addMoney(sum, holdingValues.get(holding.id) ?? 0), 0)
+  const currentLiabilities = liabilities.filter((item) => !item.archived_at && !item.deleted_at).reduce((sum, item) => addMoney(sum, Number(item.outstanding_balance)), 0)
   const contributions = transactions.filter((item) => item.type === 'investment').reduce((sum, item) => addMoney(sum, Number(item.amount)), 0)
   const summaryCards = [
     { title: 'Income this month', value: summary.income, icon: <ArrowDownLeft />, tone: 'mint' },
@@ -627,7 +728,7 @@ export function AiDialog({ accessToken, categories, incomeSources, transactions,
   onSetDeleted: (id: string, deleted: boolean) => Promise<void>
   aiAdapter?: ReturnType<typeof createAiAdapter>
 }) {
-  type NewItem = Extract<AiProposal, { action: 'create' }>['items'][number] & { categoryId: string; incomeSourceId: string; savingsGoalId: string; itemIndex: number }
+  type NewItem = ResolvedAiItem
   type Change = Extract<AiProposal, { action: 'change' }>
   const [text, setText] = useState('')
   const [proposal, setProposal] = useState<AiProposal | null>(null)
@@ -639,7 +740,7 @@ export function AiDialog({ accessToken, categories, incomeSources, transactions,
   const [categoryId, setCategoryId] = useState('')
   const [busy, setBusy] = useState(false)
   const [aiError, setAiError] = useState('')
-  const activeCategories = categories.filter((item) => !item.archived_at)
+  const activeCategories = categories.filter((item) => !item.archived_at && !item.deleted_at)
   const activeTransactions = transactions.filter((item) => !item.deleted_at)
   const matches = useMemo(() => {
     if (proposal?.action !== 'change') return []
@@ -650,6 +751,28 @@ export function AiDialog({ accessToken, categories, incomeSources, transactions,
     })
   }, [activeTransactions, proposal])
   const selected = matches.find((item) => item.id === selectedId)
+  const totalFor = (type: TransactionType) => {
+    const group = items.filter((item) => item.type === type)
+    if (group.some((item) => !Number.isFinite(item.amount))) return null
+    return group.reduce((total, item) => addMoney(total, item.amount), 0)
+  }
+  const formatTotal = (type: TransactionType) => {
+    const total = totalFor(type)
+    return total === null ? 'Resolve amount' : rupees(total)
+  }
+  const readyToConfirm = items.length > 0 && items.length <= 25 && items.every((item) => (
+    Number.isFinite(item.amount) && item.amount > 0 && item.amount <= 999999999999
+    && Math.abs(item.amount * 100 - Math.round(item.amount * 100)) < 1e-7
+    && validDate(item.occurredOn)
+    && item.description.trim().length > 0 && item.description.length <= 180
+    && activeCategories.some((category) => category.id === item.categoryId && category.type === item.type)
+    && !(item.type === 'investment' && (item.instrumentRequired || !item.instrumentName.trim()))
+    && !(item.type === 'savings' && item.destinationRequired)
+    && !(item.type === 'savings' && item.savingsGoalId
+      && !goals.some((goal) => goal.id === item.savingsGoalId && !goal.archived_at && !goal.deleted_at))
+    && !(item.type === 'income' && item.incomeSourceId
+      && !incomeSources.some((source) => source.id === item.incomeSourceId && !source.archived_at && !source.deleted_at))
+  ))
 
   async function parse(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -667,13 +790,7 @@ export function AiDialog({ accessToken, categories, incomeSources, transactions,
       setProposal(checked)
       if (checked.action === 'create') {
         setSubmissionId(crypto.randomUUID())
-        setItems(checked.items.map((item, itemIndex) => ({
-          ...item,
-          itemIndex,
-          categoryId: activeCategories.find((category) => category.type === item.type && category.name.toLocaleLowerCase() === item.categoryName.toLocaleLowerCase())?.id ?? '',
-          incomeSourceId: incomeSources.find((source) => source.name.toLocaleLowerCase() === item.sourceName?.toLocaleLowerCase() && !source.archived_at)?.id ?? '',
-          savingsGoalId: '',
-        })))
+        setItems(resolveAiBatchItems(checked.items, activeCategories, goals, incomeSources, today(), text))
       } else if (checked.action === 'change') {
         setChangeDraft(checked)
         const tokens = checked.searchText.toLocaleLowerCase().split(/\s+/).filter(Boolean)
@@ -708,12 +825,16 @@ export function AiDialog({ accessToken, categories, incomeSources, transactions,
     setAiError('')
     const candidate = {
       action: 'create' as const,
+      intent: 'create' as const,
       items: items.map((item) => ({
         type: item.type,
         amount: item.amount,
         categoryName: item.categoryName,
         description: item.description,
         occurredOn: item.occurredOn,
+        ...(item.instrumentName ? { instrumentName: item.instrumentName } : {}),
+        ...(item.savingsGoalName ? { savingsGoalName: item.savingsGoalName } : {}),
+        ...(item.assumptions?.length ? { assumptions: item.assumptions } : {}),
         ...(item.sourceName === undefined ? {} : { sourceName: item.sourceName }),
         ...(item.merchantName === undefined ? {} : { merchantName: item.merchantName }),
       })),
@@ -726,8 +847,14 @@ export function AiDialog({ accessToken, categories, incomeSources, transactions,
       setAiError(`Review all proposed values before saving. ${errorText(failure)}`)
       return
     }
-    if (checked.items.length !== items.length || items.some((item) => !activeCategories.some((category) => category.id === item.categoryId && category.type === item.type))) {
-      setAiError('Choose a matching active category for every proposed transaction.')
+    if (checked.items.length !== items.length || items.some((item) => !Number.isFinite(item.amount) || item.amount <= 0
+      || !activeCategories.some((category) => category.id === item.categoryId && category.type === item.type)
+      || !validDate(item.occurredOn)
+      || (item.type === 'investment' && (item.instrumentRequired || !item.instrumentName.trim()))
+      || (item.type === 'savings' && item.destinationRequired)
+      || (item.type === 'savings' && item.savingsGoalId && !goals.some((goal) => goal.id === item.savingsGoalId && !goal.archived_at && !goal.deleted_at))
+      || (item.type === 'income' && item.incomeSourceId && !incomeSources.some((source) => source.id === item.incomeSourceId && !source.archived_at && !source.deleted_at)))) {
+      setAiError('Resolve every category, destination, instrument and valid amount/date before confirming the batch.')
       return
     }
     setBusy(true)
@@ -745,6 +872,7 @@ export function AiDialog({ accessToken, categories, incomeSources, transactions,
           source_name: item.sourceName ?? null,
           merchant_name: item.merchantName ?? null,
           savings_goal_id: item.type === 'savings' ? item.savingsGoalId || null : null,
+          instrument_name: item.type === 'investment' ? item.instrumentName.trim() : null,
         },
       })), submissionId)
       close()
@@ -794,7 +922,61 @@ export function AiDialog({ accessToken, categories, incomeSources, transactions,
 
   return <div className="modal-backdrop ai-backdrop"><section className="modal ai-dialog glass" role="dialog" aria-modal="true" aria-labelledby="ai-dialog-title"><div className="modal-head"><div><span className="eyebrow">AI QUICK ENTRY</span><h2 id="ai-dialog-title">Review before anything is saved</h2></div><button className="icon-button" aria-label="Close AI entry" onClick={close}><X size={18} /></button></div>
     {!proposal && <form className="ai-modal" onSubmit={(event) => void parse(event)}><div className="ai-badge"><Bot size={19} /></div><p>Describe a new entry or ask to update/delete one of your active transactions. AI text is sent to Cloudflare for parsing; the app searches only your own active records.</p><label htmlFor="ai-text">Description<textarea id="ai-text" value={text} onChange={(event) => setText(event.target.value)} placeholder="e.g. Spent ₹400 on groceries today" rows={4} maxLength={2000} required /></label><div className="privacy-note"><ShieldCheck size={16} /> No financial record is written until you review and confirm. Manual entry remains available if AI is unavailable.</div><div className="modal-actions"><button type="button" className="secondary" onClick={close}>Cancel</button><button className="primary" disabled={busy || !text.trim()}><Sparkles size={16} />{busy ? 'Parsing…' : 'Prepare preview'}</button></div></form>}
-    {proposal?.action === 'create' && <div className="proposal-preview"><p>Review every field, resolved date, and category. Remove any row you do not want; nothing is saved until you confirm.</p>{submissionAttempted && aiError && <p className="muted-note">This batch is locked after an uncertain write response. Retry the exact same values or cancel and check your transaction list first.</p>}{items.map((item, index) => <fieldset className="proposal-row" key={`${submissionId}-${index}`} disabled={submissionAttempted || busy}><legend>Proposed transaction {index + 1}</legend><button type="button" className="secondary remove-proposal" onClick={() => setItems((existing) => existing.filter((_, rowIndex) => rowIndex !== index))}>Remove row</button><label>Type<select value={item.type} onChange={(event) => { const type = event.target.value as TransactionType; updateItem(index, { type, categoryId: activeCategories.find((category) => category.type === type)?.id ?? '', incomeSourceId: '', savingsGoalId: '' }) }}>{['income', 'expense', 'investment', 'savings'].map((value) => <option value={value} key={value}>{titleCase(value)}</option>)}</select></label><label>Amount (₹)<input type="number" min="0.01" step="0.01" value={item.amount} onChange={(event) => updateItem(index, { amount: Number(event.target.value) })} /></label><label>Category<select value={item.categoryId} onChange={(event) => updateItem(index, { categoryId: event.target.value, categoryName: activeCategories.find((category) => category.id === event.target.value)?.name ?? '' })}><option value="">Choose a category</option>{activeCategories.filter((category) => category.type === item.type).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label><label>Description<input value={item.description} maxLength={180} onChange={(event) => updateItem(index, { description: event.target.value })} /></label><label>Resolved date<input type="date" value={item.occurredOn} onChange={(event) => updateItem(index, { occurredOn: event.target.value })} /></label>{item.type === 'income' && <label>Income source<select value={item.incomeSourceId} onChange={(event) => { const source = incomeSources.find((entry) => entry.id === event.target.value); updateItem(index, { incomeSourceId: event.target.value, sourceName: source?.name ?? '' }) }}><option value="">No linked source</option>{incomeSources.filter((source) => !source.archived_at).map((source) => <option key={source.id} value={source.id}>{source.name}</option>)}</select></label>}<label>Source details<input value={item.sourceName ?? ''} maxLength={120} onChange={(event) => updateItem(index, { sourceName: event.target.value })} /></label><label>Merchant<input value={item.merchantName ?? ''} maxLength={120} onChange={(event) => updateItem(index, { merchantName: event.target.value })} /></label>{item.type === 'savings' && <label>Link to savings goal<select value={item.savingsGoalId} onChange={(event) => updateItem(index, { savingsGoalId: event.target.value })}><option value="">No linked goal</option>{goals.filter((goal) => !goal.archived_at).map((goal) => <option key={goal.id} value={goal.id}>{goal.name}</option>)}</select></label>}</fieldset>)}<div className="modal-actions"><button className="secondary" onClick={close}>Cancel batch</button><button className="primary" disabled={busy || items.length === 0} onClick={() => void confirmCreate()}>{busy ? 'Saving…' : submissionAttempted ? 'Retry save same batch' : `Confirm and save ${items.length} ${items.length === 1 ? 'transaction' : 'transactions'}`}</button></div></div>}
+    {proposal?.action === 'create' && <div className="proposal-preview">
+      <p>Review every proposed entry, resolved date, category and assumption. Nothing is written until you confirm the complete batch.</p>
+      {submissionAttempted && aiError && <p className="muted-note">The write response was uncertain. Retry the exact same values or cancel and check your transaction list first.</p>}
+      <section className="ai-batch-summary" aria-label="Batch totals">
+        <strong>Batch summary · {items.length} proposed {items.length === 1 ? 'record' : 'records'}</strong>
+        <span>Income: {formatTotal('income')}</span>
+        <span>Expenses: {formatTotal('expense')}</span>
+        <span>Savings contributions: {formatTotal('savings')}</span>
+        <span>Investment contributions: {formatTotal('investment')}</span>
+      </section>
+      {items.map((item, index) => <fieldset className="proposal-row" key={`${submissionId}-${item.itemIndex}`} disabled={submissionAttempted || busy}>
+        <legend>{titleCase(item.type)} · Proposed entry {index + 1}</legend>
+        <button type="button" className="secondary remove-proposal" onClick={() => setItems((existing) => existing.filter((_, rowIndex) => rowIndex !== index))}>Remove row</button>
+        <label>Type<select value={item.type} onChange={(event) => {
+          const type = event.target.value as TransactionType
+          const category = activeCategories.find((candidate) => candidate.type === type)
+          updateItem(index, {
+            type,
+            categoryId: category?.id ?? '',
+            categoryName: category?.name ?? '',
+            incomeSourceId: '',
+            savingsGoalId: '',
+            destinationRequired: false,
+            instrumentName: '',
+            instrumentRequired: type === 'investment',
+          })
+        }}>{['income', 'expense', 'investment', 'savings'].map((value) => <option value={value} key={value}>{titleCase(value)}</option>)}</select></label>
+        <label>Amount (₹)<input type="number" min="0.01" step="0.01" value={item.amountText} onChange={(event) => updateItem(index, { amountText: event.target.value, amount: event.target.value === '' ? Number.NaN : Number(event.target.value) })} /></label>
+        <label>Category<select value={item.categoryId} onChange={(event) => {
+          const category = activeCategories.find((candidate) => candidate.id === event.target.value)
+          updateItem(index, {
+            categoryId: event.target.value,
+            categoryName: category?.name ?? '',
+            ...(item.type === 'savings' && !item.savingsGoalName ? { destinationRequired: false } : {}),
+          })
+        }}><option value="">Choose a category</option>{activeCategories.filter((category) => category.type === item.type).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
+        <label>Description<input value={item.description} maxLength={180} onChange={(event) => updateItem(index, { description: event.target.value })} /></label>
+        <label>Resolved date<input type="date" value={item.occurredOn} onChange={(event) => updateItem(index, { occurredOn: event.target.value })} /></label>
+        {item.type === 'income' && <label>Income source<select value={item.incomeSourceId} onChange={(event) => {
+          const source = incomeSources.find((entry) => entry.id === event.target.value)
+          updateItem(index, { incomeSourceId: event.target.value, sourceName: source?.name ?? '' })
+        }}><option value="">No linked source</option>{incomeSources.filter((source) => !source.archived_at && !source.deleted_at).map((source) => <option key={source.id} value={source.id}>{source.name}</option>)}</select></label>}
+        {(item.type === 'income' || item.sourceName) && <label>Source details<input value={item.sourceName ?? ''} maxLength={120} onChange={(event) => updateItem(index, { sourceName: event.target.value })} /></label>}
+        {(item.type === 'expense' || item.merchantName) && <label>Merchant<input value={item.merchantName ?? ''} maxLength={120} onChange={(event) => updateItem(index, { merchantName: event.target.value })} /></label>}
+        {item.type === 'investment' && <label>Investment instrument<input value={item.instrumentName ?? ''} maxLength={120} placeholder="Enter an instrument; none was invented" onChange={(event) => {
+          const instrumentName = event.target.value
+          updateItem(index, { instrumentName, instrumentRequired: !instrumentName.trim() })
+        }} /></label>}
+        {item.type === 'savings' && <label>Savings goal<select value={item.savingsGoalId} onChange={(event) => updateItem(index, { savingsGoalId: event.target.value, destinationRequired: item.savingsGoalName ? !event.target.value : false })}><option value="">No linked goal</option>{goals.filter((goal) => !goal.archived_at && !goal.deleted_at).map((goal) => <option key={goal.id} value={goal.id}>{goal.name}</option>)}</select></label>}
+        {item.assumptions?.map((assumption, assumptionIndex) => <p className="ai-assumption" key={`${item.itemIndex}-assumption-${assumptionIndex}`} role="note">Assumption: {assumption}</p>)}
+        {item.instrumentRequired && <p className="form-error">Enter the actual investment instrument before confirming.</p>}
+        {item.destinationRequired && <p className="form-error">Select a valid savings destination before confirming.</p>}
+      </fieldset>)}
+      <div className="modal-actions"><button className="secondary" onClick={close}>Cancel batch</button><button className="primary" disabled={busy || !readyToConfirm} onClick={() => void confirmCreate()}>{busy ? 'Saving…' : submissionAttempted ? 'Retry save same batch' : `Confirm and save ${items.length} ${items.length === 1 ? 'transaction' : 'transactions'}`}</button></div>
+    </div>}
     {proposal?.action === 'change' && <div className="proposal-preview"><p>Search matches are your own active transactions only. Select the row to change; compare both sides before confirming.</p>{matches.length === 0 ? <p role="status">No active transactions match “{proposal.searchText}”. Try another description or use manual entry.</p> : <label>Matching active transaction<select aria-label="Select a matching transaction" value={selectedId} onChange={(event) => { const next = matches.find((item) => item.id === event.target.value); const requestedCategory = next && changeDraft?.changes?.categoryName ? activeCategories.find((item) => item.type === next.type && item.name.toLocaleLowerCase() === changeDraft.changes?.categoryName?.toLocaleLowerCase()) : undefined; setSelectedId(event.target.value); setCategoryId(requestedCategory?.id ?? next?.category_id ?? '') }}><option value="">Select a transaction</option>{matches.map((item) => <option key={item.id} value={item.id}>{item.occurred_on} · {item.description} · {item.categories?.name ?? 'Uncategorized'} · {rupees(Number(item.amount))}</option>)}</select></label>}
       {selected && changeDraft?.intent === 'update' && <div className="side-by-side"><section><h3>Current record</h3><p>{selected.description}</p><p>{rupees(Number(selected.amount))} · {selected.categories?.name ?? 'Uncategorized'}</p><p>{selected.occurred_on}</p><p>{selected.merchant_name || 'No merchant'} · {selected.source_name || 'No source'}</p></section><section><h3>Proposed update</h3><label>Amount<input type="number" min="0.01" step="0.01" value={changeDraft.changes?.amount ?? Number(selected.amount)} onChange={(event) => setChangeDraft({ ...changeDraft, changes: { ...changeDraft.changes, amount: Number(event.target.value) } })} /></label><label>Category<select value={categoryId || activeCategories.find((item) => item.id === selected.category_id)?.id || ''} onChange={(event) => { const next = activeCategories.find((item) => item.id === event.target.value); setCategoryId(event.target.value); if (next) setChangeDraft({ ...changeDraft, changes: { ...changeDraft.changes, categoryName: next.name } }) }}>{activeCategories.filter((item) => item.type === selected.type).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Description<input value={changeDraft.changes?.description ?? selected.description} maxLength={180} onChange={(event) => setChangeDraft({ ...changeDraft, changes: { ...changeDraft.changes, description: event.target.value } })} /></label><label>Date<input type="date" value={changeDraft.changes?.occurredOn ?? selected.occurred_on} onChange={(event) => setChangeDraft({ ...changeDraft, changes: { ...changeDraft.changes, occurredOn: event.target.value } })} /></label><label>Source<input value={changeDraft.changes?.sourceName ?? selected.source_name ?? ''} onChange={(event) => setChangeDraft({ ...changeDraft, changes: { ...changeDraft.changes, sourceName: event.target.value } })} /></label><label>Merchant<input value={changeDraft.changes?.merchantName ?? selected.merchant_name ?? ''} onChange={(event) => setChangeDraft({ ...changeDraft, changes: { ...changeDraft.changes, merchantName: event.target.value } })} /></label></section></div>}
       {selected && changeDraft?.intent === 'delete' && <div className="side-by-side"><section><h3>Selected active record</h3><p>{selected.description}</p><p>{rupees(Number(selected.amount))} · {selected.occurred_on}</p></section><section><h3>Requested action</h3><p>This transaction will be moved to trash and can be restored later. No row will be permanently deleted.</p></section></div>}
@@ -875,8 +1057,8 @@ export function LoginPage({ email, password, resetMode, error, onEmail, onPasswo
   return <main className="login-wrap"><form className="login glass" onSubmit={onSubmit}><div className="brand-mark"><Wallet size={23} /></div><span className="eyebrow">PRIVATE FINANCE</span><h1>{resetMode ? 'Reset password' : 'Welcome back'}</h1><p>Sign in to your personal ledger. Accounts are invited by your administrator; public registration is disabled.</p><label>Email address<input type="email" value={email} onChange={(event) => onEmail(event.target.value)} required autoComplete="email" /></label>{!resetMode && <label>Password<input type="password" value={password} onChange={(event) => onPassword(event.target.value)} required autoComplete="current-password" /> </label>}{error && <p className="form-error" role="alert">{error}</p>}<button className="primary full">{resetMode ? 'Send reset link' : 'Sign in securely'}</button><button type="button" className="link-btn" onClick={() => onResetMode(!resetMode)}>{resetMode ? 'Back to sign in' : 'Forgot password?'}</button><div className="privacy-note"><ShieldCheck size={16} /> Your records are protected by database row-level security.</div></form></main>
 }
 
-export function SignOutButton({ onSignOut }: { onSignOut: () => void }) {
-  return <button aria-label="Sign out" className="icon-button" onClick={onSignOut}><LogOut size={16} /></button>
+export function SignOutButton({ onSignOut, disabled = false }: { onSignOut: () => void; disabled?: boolean }) {
+  return <button aria-label="Logout" className="profile-logout" onClick={onSignOut} disabled={disabled}><LogOut size={15} /><span>{disabled ? 'Signing out…' : 'Logout'}</span></button>
 }
 
 function SetupPage() {
