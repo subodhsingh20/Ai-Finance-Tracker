@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import { cloudflare } from '@cloudflare/vite-plugin'
+import { resolveSupabaseWorkerRuntimeVars } from './build/supabase-runtime-config'
 import { isSafeSupabasePublicKey, localAuthBridgePlugin } from './dev/local-auth-bridge'
 
 export default defineConfig(({ command, mode }) => {
@@ -21,15 +22,24 @@ export default defineConfig(({ command, mode }) => {
         publishableKey: frontendEnv.VITE_SUPABASE_PUBLISHABLE_KEY ?? '',
       })] : []),
       cloudflare({
-        ...(command === 'build'
-          ? { config: { secrets: { required: [] } } }
-          : isLocalDev
-            ? {
-                config: (current) => ({
-                  vars: { ...current.vars, LOCAL_AUTH_BRIDGE_SECRET: localAuthSecret },
-                }),
-              }
-            : {}),
+        ...(command === 'build' || isLocalDev
+          ? {
+              config: (current) => ({
+                ...current,
+                ...(command === 'build' ? { secrets: { required: [] } } : {}),
+                vars: {
+                  ...current.vars,
+                  ...(command === 'build'
+                    ? resolveSupabaseWorkerRuntimeVars({
+                        url: frontendEnv.VITE_SUPABASE_URL,
+                        publishableKey: frontendEnv.VITE_SUPABASE_PUBLISHABLE_KEY,
+                      })
+                    : {}),
+                  ...(isLocalDev ? { LOCAL_AUTH_BRIDGE_SECRET: localAuthSecret } : {}),
+                },
+              }),
+            }
+          : {}),
       }),
     ],
   }
