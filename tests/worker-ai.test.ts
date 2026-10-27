@@ -66,6 +66,116 @@ afterEach(() => {
 })
 
 describe('Workers AI endpoint', () => {
+  it('verifies a signed-in user with Supabase before processing AI entry', async () => {
+    const fetcher = mockSupabase()
+    const { env } = createEnv(modelResponse(JSON.stringify(validProposal)))
+
+    const response = await worker.fetch(createRequest(), env)
+
+    expect(response.status).toBe(200)
+    expect(String(fetcher.mock.calls[0]?.[0])).toBe('https://supabase.test/auth/v1/user')
+  })
+
+  it('rejects a missing bearer token without logging credentials', async () => {
+    const fetcher = mockSupabase()
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const { env, run } = createEnv(modelResponse(JSON.stringify(validProposal)))
+    const request = new Request('https://finance.test/api/ai/parse', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: 'private prompt' }),
+    })
+
+    const response = await worker.fetch(request, env)
+
+    expect(response.status).toBe(401)
+    expect(fetcher).not.toHaveBeenCalled()
+    expect(run).not.toHaveBeenCalled()
+    expect(warning).not.toHaveBeenCalled()
+  })
+
+  it('logs only sanitized status and error code when Supabase rejects verification', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const secretDetail = 'private@example.test access-token prompt transaction amount'
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      code: 'invalid_credentials',
+      message: secretDetail,
+    }, { status: 401 }))
+    vi.stubGlobal('fetch', fetcher)
+    const { env, run } = createEnv(modelResponse(JSON.stringify(validProposal)))
+
+    const response = await worker.fetch(createRequest(), env)
+
+    expect(response.status).toBe(401)
+    expect(run).not.toHaveBeenCalled()
+    const diagnostic = String(warning.mock.calls[0]?.[0])
+    expect(diagnostic).toContain('"stage":"upstream_rejected"')
+    expect(diagnostic).toContain('"http_status":401')
+    expect(diagnostic).toContain('"upstream_error_code":"invalid_credentials"')
+    expect(diagnostic).not.toContain(secretDetail)
+    expect(diagnostic).not.toContain('test-publishable-key')
+    expect(diagnostic).not.toContain('test-access-token')
+  })
+
+  it('returns auth_unavailable and logs only the exception name on fetch failure', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const fetcher = vi.fn<typeof fetch>().mockRejectedValue(new TypeError('sensitive URL and bearer details'))
+    vi.stubGlobal('fetch', fetcher)
+    const { env, run } = createEnv(modelResponse(JSON.stringify(validProposal)))
+
+    const response = await worker.fetch(createRequest(), env)
+
+    expect(response.status).toBe(503)
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: 'auth_unavailable', message: 'Sign-in verification is temporarily unavailable.' },
+    })
+    expect(run).not.toHaveBeenCalled()
+    const diagnostic = String(warning.mock.calls[0]?.[0])
+    expect(diagnostic).toContain('"stage":"request_failed"')
+    expect(diagnostic).toContain('"exception_name":"TypeError"')
+    expect(diagnostic).not.toContain('sensitive URL')
+    expect(diagnostic).not.toContain('test-access-token')
+  })
+
+  it('returns auth_unavailable for a malformed successful Auth response body', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const secretDetail = 'private email and token data'
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(secretDetail, { status: 200 }))
+    vi.stubGlobal('fetch', fetcher)
+    const { env, run } = createEnv(modelResponse(JSON.stringify(validProposal)))
+
+    const response = await worker.fetch(createRequest(), env)
+
+    expect(response.status).toBe(503)
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: 'auth_unavailable', message: 'Sign-in verification is temporarily unavailable.' },
+    })
+    expect(run).not.toHaveBeenCalled()
+    const diagnostic = String(warning.mock.calls[0]?.[0])
+    expect(diagnostic).toContain('"stage":"invalid_response_body"')
+    expect(diagnostic).toContain('"exception_name":"SyntaxError"')
+    expect(diagnostic).not.toContain(secretDetail)
+  })
+
+  it('rejects malformed Supabase URL configuration without making a request', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const fetcher = mockSupabase()
+    const { env: configuredEnv, run } = createEnv(modelResponse(JSON.stringify(validProposal)))
+    const env = { ...configuredEnv, SUPABASE_URL: 'not-a-valid-url-with-private-data' } as typeof configuredEnv
+
+    const response = await worker.fetch(createRequest(), env)
+
+    expect(response.status).toBe(503)
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: 'auth_unavailable', message: 'Sign-in verification is temporarily unavailable.' },
+    })
+    expect(fetcher).not.toHaveBeenCalled()
+    expect(run).not.toHaveBeenCalled()
+    const diagnostic = String(warning.mock.calls[0]?.[0])
+    expect(diagnostic).toContain('"stage":"configuration_invalid"')
+    expect(diagnostic).not.toContain('private-data')
+  })
+
   it('extracts and validates the GLM chat-completion content', async () => {
     mockSupabase()
     const { env, run } = createEnv(modelResponse(JSON.stringify(validProposal)))

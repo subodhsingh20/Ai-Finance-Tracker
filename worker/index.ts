@@ -22,6 +22,47 @@ function reportAiFailure(event: string, metadata: Record<string, unknown> = {}) 
   console.warn(JSON.stringify({ event, ...metadata }))
 }
 
+function reportAuthVerificationFailure(
+  stage: string,
+  metadata: { http_status?: number; upstream_error_code?: string; exception_name?: string } = {},
+) {
+  console.warn(JSON.stringify({ event: 'supabase_auth_verification_failure', stage, ...metadata }))
+}
+
+function sanitizedUpstreamErrorCode(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const code = value.trim()
+  return /^[A-Za-z0-9_]{1,64}$/.test(code) ? code : undefined
+}
+
+async function readUpstreamErrorCode(response: Response): Promise<string | undefined> {
+  try {
+    const body: unknown = await response.json()
+    if (typeof body !== 'object' || body === null || Array.isArray(body)) return undefined
+    const fields = body as Record<string, unknown>
+    return sanitizedUpstreamErrorCode(fields.code)
+      ?? sanitizedUpstreamErrorCode(fields.error_code)
+  } catch {
+    return undefined
+  }
+}
+
+function validSupabaseBaseUrl(value: string): URL | null {
+  try {
+    const url = new URL(value)
+    if ((url.protocol !== 'https:' && url.protocol !== 'http:')
+      || url.username || url.password || url.search || url.hash) return null
+    return url
+  } catch {
+    return null
+  }
+}
+
+function exceptionName(failure: unknown): string {
+  if (failure instanceof Error && /^[A-Za-z][A-Za-z0-9]{0,63}$/.test(failure.name)) return failure.name
+  return 'UnknownError'
+}
+
 function modelFailure(code: string, message: string, status = 502) {
   return json({ error: { code, message } }, status)
 }
@@ -161,20 +202,49 @@ export default {
       const supabaseUrl = env.SUPABASE_URL ?? env.VITE_SUPABASE_URL
       const supabasePublishableKey = env.SUPABASE_PUBLISHABLE_KEY ?? env.VITE_SUPABASE_PUBLISHABLE_KEY
       if (!supabaseUrl || !supabasePublishableKey) {
+        reportAuthVerificationFailure('configuration_missing')
         return json({ error: { code: 'auth_unavailable', message: 'AI sign-in verification is not configured. Contact the administrator.' } }, 503)
       }
 
+      const baseUrl = validSupabaseBaseUrl(supabaseUrl)
+      if (!baseUrl) {
+        reportAuthVerificationFailure('configuration_invalid')
+        return json({ error: { code: 'auth_unavailable', message: 'Sign-in verification is temporarily unavailable.' } }, 503)
+      }
+      const authUrl = new URL('/auth/v1/user', baseUrl)
+
+      let response: Response
       try {
-        const response = await fetch(`${supabaseUrl}/auth/v1/user`, {
+        response = await fetch(authUrl, {
           headers: { apikey: supabasePublishableKey, Authorization: `Bearer ${accessToken}` },
           signal: AbortSignal.timeout(5000),
           redirect: 'error',
         })
-        if (!response.ok) {
-          return json({ error: { code: 'unauthorized', message: 'Your session is invalid or expired.' } }, 401)
+      } catch (failure) {
+        reportAuthVerificationFailure('request_failed', { exception_name: exceptionName(failure) })
+        return json({ error: { code: 'auth_unavailable', message: 'Sign-in verification is temporarily unavailable.' } }, 503)
+      }
+
+      if (!response.ok) {
+        reportAuthVerificationFailure('upstream_rejected', {
+          http_status: response.status,
+          upstream_error_code: await readUpstreamErrorCode(response),
+        })
+        return json({ error: { code: 'unauthorized', message: 'Your session is invalid or expired.' } }, 401)
+      }
+
+      try {
+        const body: unknown = await response.json()
+        if (typeof body !== 'object' || body === null || Array.isArray(body)
+          || typeof (body as Record<string, unknown>).id !== 'string'
+          || !(typeof (body as Record<string, unknown>).email_confirmed_at === 'string'
+            || (body as Record<string, unknown>).email_confirmed_at === null)) {
+          reportAuthVerificationFailure('invalid_response_body')
+          return json({ error: { code: 'auth_unavailable', message: 'Sign-in verification is temporarily unavailable.' } }, 503)
         }
-        identity = await response.json() as { id?: string; email_confirmed_at?: string | null }
-      } catch {
+        identity = body as { id: string; email_confirmed_at: string | null }
+      } catch (failure) {
+        reportAuthVerificationFailure('invalid_response_body', { exception_name: exceptionName(failure) })
         return json({ error: { code: 'auth_unavailable', message: 'Sign-in verification is temporarily unavailable.' } }, 503)
       }
       if (!identity.id || !identity.email_confirmed_at) {
