@@ -603,4 +603,28 @@ describe('Workers AI endpoint', () => {
     })
     expect(run).not.toHaveBeenCalled()
   })
+
+  it('does not follow quota RPC redirects and reports quota unavailable', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      if (String(input).endsWith('/auth/v1/user')) {
+        return Response.json({ id: 'test-user', email_confirmed_at: '2026-10-26T00:00:00Z' })
+      }
+      return new Response(null, {
+        status: 302,
+        headers: { Location: 'https://redirected.example.test/rest/v1/rpc/consume_ai_usage' },
+      })
+    })
+    vi.stubGlobal('fetch', fetcher)
+    const { env, run } = createEnv(modelResponse(JSON.stringify(validProposal)))
+
+    const response = await worker.fetch(createRequest(), env)
+
+    expect(response.status).toBe(503)
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: 'quota_unavailable' },
+    })
+    expect(fetcher).toHaveBeenCalledTimes(2)
+    expect(fetcher.mock.calls[1]?.[1]?.redirect).toBe('manual')
+    expect(run).not.toHaveBeenCalled()
+  })
 })

@@ -285,7 +285,7 @@ export default {
         },
         body: '{}',
         signal: AbortSignal.timeout(5000),
-        redirect: 'error',
+        redirect: 'manual',
       })
       if (!quotaResponse.ok) {
         return json({ error: { code: 'quota_unavailable', message: 'AI is temporarily unavailable. You can still add transactions manually.' } }, 503)
