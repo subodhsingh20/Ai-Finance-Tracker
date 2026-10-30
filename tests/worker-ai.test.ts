@@ -117,6 +117,28 @@ describe('Workers AI endpoint', () => {
     expect(diagnostic).not.toContain('test-access-token')
   })
 
+  it('does not follow Supabase Auth redirects and handles them as upstream rejection', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, {
+      status: 302,
+      headers: { Location: 'https://redirected.example.test/auth/v1/user' },
+    }))
+    vi.stubGlobal('fetch', fetcher)
+    const { env, run } = createEnv(modelResponse(JSON.stringify(validProposal)))
+
+    const response = await worker.fetch(createRequest(), env)
+
+    expect(response.status).toBe(401)
+    expect(fetcher).toHaveBeenCalledOnce()
+    expect(fetcher.mock.calls[0]?.[1]?.redirect).toBe('manual')
+    expect(run).not.toHaveBeenCalled()
+    const diagnostic = String(warning.mock.calls[0]?.[0])
+    expect(diagnostic).toContain('"stage":"upstream_rejected"')
+    expect(diagnostic).toContain('"http_status":302')
+    expect(diagnostic).not.toContain('redirected.example.test')
+    expect(diagnostic).not.toContain('test-access-token')
+  })
+
   it('returns auth_unavailable and logs only the exception name on fetch failure', async () => {
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const fetcher = vi.fn<typeof fetch>().mockRejectedValue(new TypeError('sensitive URL and bearer details'))

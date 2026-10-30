@@ -218,7 +218,7 @@ export default {
         response = await fetch(authUrl, {
           headers: { apikey: supabasePublishableKey, Authorization: `Bearer ${accessToken}` },
           signal: AbortSignal.timeout(5000),
-          redirect: 'error',
+          redirect: 'manual',
         })
       } catch (failure) {
         reportAuthVerificationFailure('request_failed', { exception_name: exceptionName(failure) })
