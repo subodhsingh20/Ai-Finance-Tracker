@@ -1,44 +1,34 @@
 # Friday — AI Finance Tracker
 
-A private, invite-only INR finance tracker built with React, Vite, Cloudflare Workers/Workers AI, and Supabase Auth/Postgres. This is an actively developed foundation, **not production-ready**. The migrations and pgTAP suite have been applied and run against the existing local Supabase instance; no hosted database migration or multi-user live-isolation check has been performed. An unintended Cloudflare Worker deployment occurred during local artifact verification on 2026-10-27; its endpoint, authentication, AI behavior, and isolation have not been smoke-tested. Do not use it as the sole record of financial data.
+Ledger is a private, invite-only app for tracking personal finances in Indian rupees (INR). Use it to record transactions, manage budgets and savings goals, and keep track of income, assets, and liabilities. An AI assistant can turn written notes into transaction suggestions for you to review before saving.
 
-See [docs/IMPLEMENTATION_CHECKLIST.md](./docs/IMPLEMENTATION_CHECKLIST.md) for implementation and verification status.
+> **Project status:** Ledger is under active development and is not ready to be relied on as the only record of your finances. It has not been fully checked in a hosted environment.
 
-## Current implementation
+## What you can do
 
-- Invite-only email/password sign-in and password reset; no public sign-up flow in the application.
-- First-login setup for profile, enabled modules, dashboard preferences, budget, categories, income sources, savings goals, assets, and liabilities.
-- Supabase-backed transaction, category, budget, goal, income-source, asset/valuation, holding/valuation, liability, and profile workflows; RLS is the database isolation boundary.
-- Central Archive & Trash page supports archived and soft-deleted records, state-preserving restore, and explicitly confirmed, owner-scoped permanent deletion through database functions. Permanent deletion may be blocked by financial-history dependencies.
-- Dashboard summaries and charts use the signed-in user's active transactions, budgets, goals, liabilities, and recorded valuation snapshots. Asset and holding valuations are manually entered; there is no live market feed.
-- AI batch entry accepts up to 25 distinct entries from lines, comma-separated text, or natural sentences. The editable preview resolves only the signed-in user's active categories/goals, flags defaults and unresolved investment instruments, separates income/expense/savings/investment totals, and requires confirmation. An invoker-rights `create_ai_transaction_batch` RPC writes each complete batch atomically and serializes submission retries; composite foreign keys and RLS enforce owner/type integrity. Update/delete intents still search only the user's active rows, preview the selected change and require confirmation. AI never receives authority to execute SQL or choose record IDs.
-- Local unit/UI tests cover finance helpers, AI batch schema/default resolution, Worker auth/quota/provider paths, preview edits/removal/cancel/confirmation/retry, sign-in/onboarding controls, manual forms, Archive & Trash actions, and accessible controls. The local Supabase pgTAP suite covers three files, including atomic batch writes and retry/ownership checks.
+- Track income, expenses, savings, and investments.
+- Review dashboards and summaries based on your records.
+- Organize older or removed records in Archive & Trash, and restore them when needed.
+- Enter several transactions at once with AI suggestions. Check the preview and confirm before anything is saved.
+- Export filtered transaction data as CSV or JSON.
 
-## Verified platform assumptions
+## Built with
 
-Checked against official provider documentation on **2026-11-02**. Pricing, limits, model availability, and dashboard settings can change; check the linked pages again before deployment.
+- React, TypeScript, and Vite
+- Supabase Auth and Postgres for accounts and data
+- Cloudflare Workers and Workers AI for AI-assisted entry
 
-| Topic | Verified behavior and project setting | Official source |
-|---|---|---|
-| React + Vite on Workers | Cloudflare's current guide supports an existing React/Vite SPA with the Cloudflare Vite plugin, a `wrangler.jsonc`, and a Worker entry point. This repository uses `@vitejs/plugin-react`, `@cloudflare/vite-plugin`, and `worker/index.ts`. | [Cloudflare React + Vite guide](https://developers.cloudflare.com/workers/framework-guides/web-apps/react/), [Vite plugin](https://developers.cloudflare.com/workers/vite-plugin/) |
-| Workers AI binding | The Wrangler AI binding is `AI`; the Worker uses that binding and the model is set in `wrangler.jsonc`. | [Workers AI bindings](https://developers.cloudflare.com/workers-ai/configuration/bindings/) |
-| Selected model | Wrangler config selects `@cf/zai-org/glm-4.7-flash`; the Worker reads `AI_MODEL` rather than duplicating the ID. Model availability and pricing are not asserted here; check Cloudflare's current model and account documentation before use. | [GLM-4.7-Flash model page](https://developers.cloudflare.com/workers-ai/models/glm-4.7-flash/) |
-| Workers AI allowance | Cloudflare currently documents 10,000 Neurons/day at no charge; usage above that requires a Paid Workers plan and is listed at $0.011/1,000 Neurons. These are provider-wide terms, not a per-user guarantee. | [Workers AI pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/) |
-| Supabase browser key and RLS | The browser uses the current `sb_publishable_...` API key, which is safe to expose. RLS and database grants—not hiding this key—must enforce access. The migration enables RLS and explicitly grants only required operations to `authenticated`. Supabase currently documents deprecating legacy `anon` and `service_role` keys by the end of 2026; never put an elevated secret/service-role key in browser or Worker configuration. | [Supabase API keys](https://supabase.com/docs/guides/getting-started/api-keys), [Supabase RLS](https://supabase.com/docs/guides/database/postgres/row-level-security) |
-| Supabase Auth | Password-based email Auth is supported. The product has no public registration UI; disable sign-ups in Supabase Auth settings and invite users administratively. | [Supabase password Auth](https://supabase.com/docs/guides/auth/passwords), [Auth configuration](https://supabase.com/docs/guides/auth/redirect-urls) |
-| Supabase database tests | Supabase documents `supabase test db` for SQL/pgTAP database tests. The current local run passes 56 assertions across three files; the non-destructive local migration command is `supabase migration up --local`. | [Supabase database testing](https://supabase.com/docs/guides/database/postgres/row-level-security) |
-| Supabase backup | Free projects should export regularly with `supabase db dump`; provider daily backups are listed for Pro (7 days), Team (14 days), and Enterprise (up to 30 days). | [Supabase database backups](https://supabase.com/docs/guides/platform/backups), [CLI `db dump`](https://supabase.com/docs/reference/cli/supabase-db-dump) |
-| Cloudflare CI token | Wrangler CI uses an API token and account ID. Cloudflare recommends its **Edit Cloudflare Workers** token template and restricting the token to only the account where the Worker is deployed. | [Cloudflare GitHub Actions guide](https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/) |
+## Run locally
 
-The official Supabase API-key Markdown page, RLS guidance, password Auth guide, and pricing page were retrieved directly for this review. The pricing and key deprecation details below are time-sensitive; recheck them in the provider dashboards before setup.
+### Requirements
 
-## Requirements and local setup
+- Node.js 22 and npm
+- Docker Desktop with its Linux engine, for local Supabase
+- Supabase CLI (the commands below use version 2.122.0)
 
-- Node.js 22 and npm.
-- Docker Desktop with its Linux engine running for local Supabase and database tests.
-- A Supabase project for hosted Auth and persistence; a Cloudflare account for Workers AI and eventual deployment.
+### Setup
 
-Copy `.env.example` to `.env.local` and provide the Supabase project URL and **publishable** key. Copy `.dev.vars.example` to `.dev.vars` and set the same `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` values. Use the `sb_publishable_...` key or a legacy `anon` JWT from local Supabase; never use a secret/service-role key. Vite rejects unsafe key formats so a secret cannot be embedded in the browser build. For `npm run dev`, a development-only Vite bridge verifies the bearer token and consumes the atomic quota from local Supabase through the host Node process, then gives the Worker a short-lived, one-use signed receipt. This is needed because the local Worker runtime cannot reach a loopback Supabase endpoint directly. The bridge accepts only an HTTP loopback URL and a publishable key or legacy `anon` key. Deployed Workers do not use this bridge and verify tokens and quotas directly with `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` runtime variables. The example files use placeholders only. These local files are ignored by Git.
+1. Create `.env.local` with your Supabase project URL and publishable key:
 
 ```powershell
 npm ci
