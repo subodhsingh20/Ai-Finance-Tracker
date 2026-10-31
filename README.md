@@ -1,8 +1,6 @@
 # Friday — AI Finance Tracker
 
-Ledger is a private, invite-only app for tracking personal finances in Indian rupees (INR). Use it to record transactions, manage budgets and savings goals, and keep track of income, assets, and liabilities. An AI assistant can turn written notes into transaction suggestions for you to review before saving.
-
-> **Project status:** Ledger is under active development and is not ready to be relied on as the only record of your finances. It has not been fully checked in a hosted environment.
+Friday is a private, invite-only app for tracking personal finances in Indian rupees (INR). Use it to record transactions, manage budgets and savings goals, and keep track of income, assets, and liabilities. An AI assistant can turn written notes into transaction suggestions for you to review before saving.
 
 ## What you can do
 
