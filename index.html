@@ -5,7 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0b1020" />
     <meta name="description" content="Private personal finance, thoughtfully tracked." />
-    <title>Ledger — Finance</title>
+    <script>
+      try {
+        const savedTheme = localStorage.getItem('friday-finance-theme');
+        const theme = savedTheme === 'light' ? 'light' : 'dark';
+        document.documentElement.dataset.theme = theme;
+        document.querySelector('meta[name="theme-color"]').content = theme === 'light' ? '#f3f6fa' : '#0b1020';
+      } catch {
+        document.documentElement.dataset.theme = 'dark';
+      }
+    </script>
+    <title>Friday — AI Finance Tracker</title>
   </head>
   <body>
     <div id="root"></div>

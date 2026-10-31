@@ -4,7 +4,9 @@ import App from './App'
 import './styles.css'
 import './finance.css'
 import './archive-trash.css'
+import './theme.css'
+import { ThemeProvider } from './theme'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode><App /></React.StrictMode>,
+  <React.StrictMode><ThemeProvider><App /></ThemeProvider></React.StrictMode>,
 )

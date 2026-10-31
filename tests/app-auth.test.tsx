@@ -27,7 +27,7 @@ vi.mock('../src/lib/supabase', () => ({
     },
     from: vi.fn((table: string) => {
       const result = table === 'profiles'
-        ? { data: { display_name: 'Ari Ledger', onboarding_completed: true, enabled_modules: ['overview'], dashboard_preferences: {} }, error: null }
+        ? { data: { display_name: 'Ari Friday', onboarding_completed: true, enabled_modules: ['overview'], dashboard_preferences: {} }, error: null }
         : { data: [], error: null }
       const builder: Record<string, unknown> = {}
       const chain = () => builder
@@ -54,7 +54,7 @@ describe('authenticated sidebar logout', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    expect(await screen.findByText('Ari Ledger')).toBeInTheDocument()
+    expect(await screen.findByText('Ari Friday')).toBeInTheDocument()
     const logout = screen.getByRole('button', { name: 'Logout' })
     expect(logout).toBeVisible()
     await user.click(logout)
@@ -67,10 +67,10 @@ describe('authenticated sidebar logout', () => {
     authState.signOutError = new Error('Network unavailable')
     render(<App />)
 
-    await screen.findByText('Ari Ledger')
+    await screen.findByText('Ari Friday')
     await userEvent.setup().click(screen.getByRole('button', { name: 'Logout' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not sign out: Network unavailable')
-    expect(screen.getByText('Ari Ledger')).toBeInTheDocument()
+    expect(screen.getByText('Ari Friday')).toBeInTheDocument()
   })
 })
