@@ -1,11 +1,12 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { FormEvent } from 'react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AiDialog, LoginPage, Onboarding, SignOutButton } from '../src/App'
 import { FinancePages, TransactionDialog, type FinancePagesProps, type TransactionRow } from '../src/components/FinancePages'
 import { ArchiveTrashPage, type ArchiveTrashRecord } from '../src/components/ArchiveTrashPage'
 import { createMockAiAdapter } from '../src/lib/ai'
+import { ThemeProvider } from '../src/theme'
 
 const category = { id: 'category-food', type: 'expense' as const, name: 'Food', archived_at: null }
 const transaction: TransactionRow = {
@@ -98,6 +99,70 @@ describe('authentication and onboarding controls', () => {
       enabledModules: expect.arrayContaining(['transactions', 'budgets']),
       dashboardPreferences: { cashFlow: true, categories: true, savingsGoals: true, investments: true, netWorth: true },
     })
+  })
+})
+
+describe('Friday theme preferences', () => {
+  beforeEach(() => {
+    document.documentElement.dataset.theme = 'dark'
+    window.localStorage.clear()
+  })
+
+  it('defaults to dark and provides accessible theme controls in Settings', () => {
+    render(<ThemeProvider><FinancePages {...pageProps} page="Settings" /></ThemeProvider>)
+    expect(document.documentElement).toHaveAttribute('data-theme', 'dark')
+    expect(screen.getByRole('heading', { name: 'Appearance' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /dark theme/i })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: /light theme/i })).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('switches themes immediately, persists the choice, and restores it after remount', async () => {
+    const user = userEvent.setup()
+    const { unmount } = render(<ThemeProvider><FinancePages {...pageProps} page="Settings" /></ThemeProvider>)
+    await user.click(screen.getByRole('button', { name: /light theme/i }))
+    expect(document.documentElement).toHaveAttribute('data-theme', 'light')
+    expect(window.localStorage.getItem('friday-finance-theme')).toBe('light')
+    expect(screen.getByRole('button', { name: /light theme/i })).toHaveAttribute('aria-pressed', 'true')
+
+    unmount()
+    // The early head script applies this stored choice before React mounts on a page reload.
+    document.documentElement.dataset.theme = window.localStorage.getItem('friday-finance-theme') === 'light' ? 'light' : 'dark'
+    render(<ThemeProvider><FinancePages {...pageProps} page="Settings" /></ThemeProvider>)
+    expect(document.documentElement).toHaveAttribute('data-theme', 'light')
+    await user.click(screen.getByRole('button', { name: /dark theme/i }))
+    expect(document.documentElement).toHaveAttribute('data-theme', 'dark')
+    expect(window.localStorage.getItem('friday-finance-theme')).toBe('dark')
+  })
+
+  it('falls back to dark for an invalid saved value and does not call profile or network actions', async () => {
+    window.localStorage.setItem('friday-finance-theme', 'sepia')
+    document.documentElement.dataset.theme = window.localStorage.getItem('friday-finance-theme') === 'light' ? 'light' : 'dark'
+    const saveProfile = vi.fn(noAction)
+    const fetchSpy = vi.spyOn(window, 'fetch')
+    const user = userEvent.setup()
+    render(<ThemeProvider><FinancePages {...pageProps} page="Settings" onSaveProfile={saveProfile} /></ThemeProvider>)
+    expect(document.documentElement).toHaveAttribute('data-theme', 'dark')
+    await user.click(screen.getByRole('button', { name: /light theme/i }))
+    expect(saveProfile).not.toHaveBeenCalled()
+    expect(fetchSpy).not.toHaveBeenCalled()
+    fetchSpy.mockRestore()
+  })
+
+  it('supports keyboard selection of the theme', async () => {
+    const user = userEvent.setup()
+    render(<ThemeProvider><FinancePages {...pageProps} page="Settings" /></ThemeProvider>)
+    screen.getByRole('button', { name: /dark theme/i }).focus()
+    await user.keyboard('{Tab}{Enter}')
+    expect(document.documentElement).toHaveAttribute('data-theme', 'light')
+  })
+
+  it('still switches themes when localStorage writes are unavailable', async () => {
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('Storage disabled') })
+    const user = userEvent.setup()
+    render(<ThemeProvider><FinancePages {...pageProps} page="Settings" /></ThemeProvider>)
+    await user.click(screen.getByRole('button', { name: /light theme/i }))
+    expect(document.documentElement).toHaveAttribute('data-theme', 'light')
+    setItem.mockRestore()
   })
 })
 

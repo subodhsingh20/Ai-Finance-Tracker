@@ -1,4 +1,4 @@
-# Ledger — AI Finance Tracker
+# Friday — AI Finance Tracker
 
 A private, invite-only INR finance tracker built with React, Vite, Cloudflare Workers/Workers AI, and Supabase Auth/Postgres. This is an actively developed foundation, **not production-ready**. The migrations and pgTAP suite have been applied and run against the existing local Supabase instance; no hosted database migration or multi-user live-isolation check has been performed. An unintended Cloudflare Worker deployment occurred during local artifact verification on 2026-10-27; its endpoint, authentication, AI behavior, and isolation have not been smoke-tested. Do not use it as the sole record of financial data.
 
@@ -86,7 +86,7 @@ For a logical export on Free, install `psql`, set the database connection URL fr
 
 ```powershell
 $env:SUPABASE_DB_URL = '<database connection string>'
-$backup = 'D:\EncryptedBackups\ledger-public-data.sql'
+$backup = 'D:\EncryptedBackups\friday-public-data.sql'
 npx supabase@2.122.0 db dump --db-url $env:SUPABASE_DB_URL --schema public --data-only --file $backup
 ```
 

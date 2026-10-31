@@ -1,4 +1,6 @@
 import { useMemo, useState, type FormEvent } from 'react'
+import { Moon, Sun } from 'lucide-react'
+import { useTheme } from '../theme-context'
 import { goalProgress, rupees, type FinanceTransaction } from '../lib/finance'
 
 export type TransactionType = FinanceTransaction['type']
@@ -133,7 +135,7 @@ function TransactionsPage({ transactions, categories, goals, onOpenTransaction, 
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `ledger-transactions-${new Date().toISOString().slice(0, 10)}.${format}`
+    link.download = `friday-transactions-${new Date().toISOString().slice(0, 10)}.${format}`
     link.click()
     URL.revokeObjectURL(url)
   }
@@ -323,6 +325,7 @@ function AssetsPage({ assets, liabilities, assetValues, onSaveAsset, onArchiveAs
 }
 
 function SettingsPage({ profile, onSaveProfile }: FinancePagesProps) {
+  const { theme, setTheme } = useTheme()
   const [saving, setSaving] = useState(false)
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -343,6 +346,17 @@ function SettingsPage({ profile, onSaveProfile }: FinancePagesProps) {
     }
   }
   return <section className="workspace-page panel"><PageHeading id="settings-title" title="Settings" description="Choose enabled sections and the dashboard cards shown in your workspace." />
+    <section className="appearance-section" aria-labelledby="appearance-title">
+      <div className="appearance-heading"><div><h2 id="appearance-title">Appearance</h2><p>Customize how Friday AI Finance looks on your device.</p></div><span className="current-theme">Current theme: <strong>{theme === 'dark' ? 'Dark' : 'Light'}</strong></span></div>
+      <div className="theme-options" role="group" aria-label="Theme preference">
+        <button type="button" className={`theme-option ${theme === 'dark' ? 'selected' : ''}`} aria-label="Dark theme. A comfortable dark interface." aria-pressed={theme === 'dark'} onClick={() => setTheme('dark')}>
+          <span className="theme-option-icon"><Moon size={19} aria-hidden="true" /></span><span className="theme-option-copy"><strong>Dark</strong><small>A comfortable dark interface.</small></span><span className="theme-selected-mark" aria-hidden="true">{theme === 'dark' ? 'Selected' : ''}</span>
+        </button>
+        <button type="button" className={`theme-option ${theme === 'light' ? 'selected' : ''}`} aria-label="Light theme. A clean, bright interface." aria-pressed={theme === 'light'} onClick={() => setTheme('light')}>
+          <span className="theme-option-icon"><Sun size={19} aria-hidden="true" /></span><span className="theme-option-copy"><strong>Light</strong><small>A clean, bright interface.</small></span><span className="theme-selected-mark" aria-hidden="true">{theme === 'light' ? 'Selected' : ''}</span>
+        </button>
+      </div>
+    </section>
     <form className="settings-form" onSubmit={(event) => void save(event)}><label>Display name<input name="display_name" maxLength={100} defaultValue={profile.display_name ?? ''} /></label><fieldset><legend>Enabled modules</legend>{moduleNames.map((module) => <label className="checkbox-label" key={module}><input type="checkbox" name={`module-${module}`} defaultChecked={profile.enabled_modules.includes(module)} />{titleCase(module)}</label>)}</fieldset><fieldset><legend>Dashboard cards</legend>{dashboardCards.map(([key, label]) => <label className="checkbox-label" key={key}><input type="checkbox" name={`pref-${key}`} defaultChecked={profile.dashboard_preferences[key] !== false} />{label}</label>)}</fieldset><button className="primary" disabled={saving}>{saving ? 'Saving…' : 'Save preferences'}</button></form>
   </section>
 }
