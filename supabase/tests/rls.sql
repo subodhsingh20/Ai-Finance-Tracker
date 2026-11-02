@@ -1,5 +1,5 @@
 begin;
-select plan(20);
+select plan(24);
 
 insert into auth.users(
   id, aud, role, email, encrypted_password, email_confirmed_at,
@@ -47,6 +47,27 @@ set local role authenticated;
 select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000001',true);
 
 select is((select count(*)::int from public.profiles),1,'auth trigger provisions only the signed-in profile');
+select lives_ok(
+  $$update public.profiles set dashboard_preferences=jsonb_set(dashboard_preferences,'{fontScale}','"large"'::jsonb,true) where id=auth.uid()$$,
+  'signed-in user can save their own account preferences'
+);
+select is(
+  (select dashboard_preferences->>'fontScale' from public.profiles where id=auth.uid()),
+  'large',
+  'signed-in user can read their saved account preferences'
+);
+select lives_ok(
+  $$update public.profiles set dashboard_preferences='{"fontScale":"small"}'::jsonb where id='00000000-0000-0000-0000-000000000002'$$,
+  'cross-user preference update request does not expose another account'
+);
+reset role;
+select is(
+  (select dashboard_preferences from public.profiles where id='00000000-0000-0000-0000-000000000002'),
+  '{}'::jsonb,
+  'row-level security leaves another account preferences unchanged'
+);
+set local role authenticated;
+select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000001',true);
 select is((select count(*)::int from public.categories where type='expense'),9,'auth trigger provisions default expense categories');
 select is((select count(*)::int from public.transactions where user_id='00000000-0000-0000-0000-000000000001'),1,'user can read their own transaction');
 select is((select count(*)::int from public.transactions where id='10000000-0000-0000-0000-000000000002'),0,'user cannot read another account transaction');

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { Activity, Archive, ArrowDownLeft, ArrowUpRight, Bot, BriefcaseBusiness, CalendarDays, ChartNoAxesCombined, CircleHelp, CreditCard, Home, LogOut, Plus, Settings2, ShieldCheck, Sparkles, Wallet, X } from 'lucide-react'
 import { Area, AreaChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis } from 'recharts'
@@ -7,15 +7,16 @@ import { ArchiveTrashPage, type ArchiveTrashRecord } from './components/ArchiveT
 import { createAiAdapter, validateAiProposal, type AiProposal } from './lib/ai'
 import { resolveAiBatchItems, type ResolvedAiItem } from './lib/ai-batch'
 import { addMoney, goalProgress, monthBoundsInKolkata, netWorth, rupees, summarize } from './lib/finance'
+import { DASHBOARD_CARDS, DEFAULT_DASHBOARD_ORDER, DEFAULT_MODULE_ORDER, QUICK_ACTIONS, DEFAULT_QUICK_ACTIONS, normalizeDashboardPreferences, normalizeEnabledModules, orderedIds, preferenceValue, selectedIds } from './lib/preferences'
 import { supabase } from './lib/supabase'
 
-type Profile = { display_name: string | null; onboarding_completed: boolean; enabled_modules: string[]; dashboard_preferences: Record<string, boolean> }
+type Profile = { display_name: string | null; onboarding_completed: boolean; enabled_modules: string[]; dashboard_preferences: Record<string, unknown> }
 type AssetValuation = { asset_id: string; value: number | string; as_of_date: string; recorded_at: string }
 type HoldingValuation = { holding_id: string; value: number | string; as_of_date: string; recorded_at: string }
 type OnboardingData = {
   displayName: string
   enabledModules: string[]
-  dashboardPreferences: Record<string, boolean>
+  dashboardPreferences: Record<string, unknown>
   expenseCategories: string[]
   incomeSources: string[]
   monthlyBudget: number | null
@@ -27,6 +28,7 @@ type OnboardingData = {
 const navItems = [
   { label: 'Overview', icon: Home, module: 'overview' },
   { label: 'Transactions', icon: Activity, module: 'transactions' },
+  { label: 'Reports', icon: ChartNoAxesCombined, module: 'reports' },
   { label: 'Budgets', icon: ChartNoAxesCombined, module: 'budgets' },
   { label: 'Savings', icon: Wallet, module: 'savings' },
   { label: 'Investments', icon: BriefcaseBusiness, module: 'investments' },
@@ -42,8 +44,7 @@ const validDate = (value: string) => {
 }
 const currentMonth = () => today().slice(0, 7)
 const csvColors = ['#54d8b4', '#f28496', '#88aefb', '#e9c47b', '#bd9cf4', '#75cbd5']
-const defaultModules = ['overview', 'transactions', 'budgets', 'savings', 'investments', 'assets', 'categories']
-const defaultDashboardPreferences = { cashFlow: true, categories: true, savingsGoals: true, investments: true, netWorth: true }
+const defaultModules = ['overview', 'transactions', 'reports', 'budgets', 'savings', 'investments', 'assets', 'categories']
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null)
@@ -67,12 +68,21 @@ export default function App() {
   const [loading, setLoading] = useState(false)
   const [signingOut, setSigningOut] = useState(false)
   const [page, setPage] = useState('Overview')
+  const [settingsDirty, setSettingsDirty] = useState(false)
   const [transactionEditor, setTransactionEditor] = useState<{ initial?: Partial<TransactionDraft>; transaction?: TransactionRow } | null>(null)
   const [aiOpen, setAiOpen] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const month = useMemo(() => monthBoundsInKolkata(), [])
   const activeTransactions = useMemo(() => transactions.filter((item) => !item.deleted_at), [transactions])
   const monthTransactions = useMemo(() => activeTransactions.filter((item) => item.occurred_on >= month.start && item.occurred_on <= month.end), [activeTransactions, month])
+
+  function navigateTo(nextPage: string) {
+    if (page === 'Settings' && settingsDirty && nextPage !== 'Settings') {
+      if (!window.confirm('Discard your unsaved settings changes?')) return
+      setSettingsDirty(false)
+    }
+    setPage(nextPage)
+  }
 
   function clearSignedInState() {
     setSession(null)
@@ -88,6 +98,7 @@ export default function App() {
     setAssetValues(new Map())
     setHoldingValues(new Map())
     setPage('Overview')
+    setSettingsDirty(false)
     setMobileOpen(false)
     setAiOpen(false)
     setTransactionEditor(null)
@@ -164,6 +175,23 @@ export default function App() {
     if (!session) return
     void refreshData().catch((failure: unknown) => setError(errorText(failure)))
   }, [refreshData, session])
+
+  useEffect(() => {
+    const root = document.documentElement
+    const preferences = normalizeDashboardPreferences(profile?.dashboard_preferences)
+    root.dataset.fontScale = preferenceValue(preferences.fontScale, ['small', 'medium', 'large'] as const, 'medium')
+    root.dataset.density = preferenceValue(preferences.density, ['comfortable', 'compact'] as const, 'comfortable')
+  }, [profile])
+
+  useEffect(() => {
+    if (!settingsDirty) return
+    const protectUnsavedChanges = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', protectUnsavedChanges)
+    return () => window.removeEventListener('beforeunload', protectUnsavedChanges)
+  }, [settingsDirty])
 
   async function signIn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -451,7 +479,7 @@ export default function App() {
     return deletedCount
   }
 
-  async function saveProfile(displayName: string, enabledModules: string[], dashboardPreferences: Record<string, boolean>) {
+  async function saveProfile(displayName: string, enabledModules: string[], dashboardPreferences: Record<string, unknown>) {
     const { client, userId } = requireClient()
     await commit(async () => {
       const result = await client.from('profiles').update({ display_name: displayName || null, enabled_modules: enabledModules, dashboard_preferences: dashboardPreferences }).eq('id', userId).select('id').maybeSingle()
@@ -535,17 +563,34 @@ export default function App() {
   if (error && !profile && !loading) return <main className="splash"><div className="login glass" role="alert"><h1>Unable to load your account</h1><p>{error}</p><button className="secondary" onClick={() => void refreshData().catch((failure: unknown) => setError(errorText(failure)))}>Retry</button><button className="link-btn" onClick={() => void signOut()}>Sign out</button></div></main>
   if (profile && !profile.onboarding_completed) return <Onboarding onComplete={completeOnboarding} onSignOut={() => void signOut()} error={error} />
 
-  const activeModules = profile?.enabled_modules ?? defaultModules
-  const visibleNav = navItems.filter(({ label, module }) => label === 'Overview' || label === 'Archive & Trash' || activeModules.includes(module))
+  const preferenceSource = normalizeDashboardPreferences(profile?.dashboard_preferences)
+  const activeModules = profile
+    ? normalizeEnabledModules(profile.enabled_modules, preferenceSource.modulePreferencesSaved === true, Number(preferenceSource.modulePreferencesVersion ?? 0))
+    : defaultModules
+  const moduleOrder = orderedIds(preferenceSource.moduleOrder, DEFAULT_MODULE_ORDER)
+  const visibleNav = navItems
+    .filter(({ module }) => activeModules.includes(module))
+    .sort((left, right) => left.module === 'overview' ? -1 : right.module === 'overview' ? 1 : moduleOrder.indexOf(left.module) - moduleOrder.indexOf(right.module))
+  const quickActionOrder = orderedIds(preferenceSource.quickActionOrder, QUICK_ACTIONS.map(({ id }) => id))
+  const selectedQuickActions = selectedIds(preferenceSource.quickActions, DEFAULT_QUICK_ACTIONS, QUICK_ACTIONS.map(({ id }) => id))
+  const visibleQuickActions = quickActionOrder.filter((id) => selectedQuickActions.includes(id))
+
+  function runQuickAction(id: string) {
+    const action = QUICK_ACTIONS.find((item) => item.id === id)
+    if (!action) return
+    if (action.id === 'addBudget') { navigateTo('Budgets'); return }
+    if (action.id === 'addAsset') { navigateTo('Assets & debts'); return }
+    setTransactionEditor(action.type ? { initial: { type: action.type as TransactionType } } : {})
+  }
 
   return <div className="app-shell">
-    <aside className={`sidebar ${mobileOpen ? 'open' : ''}`}>
+    <aside id="primary-navigation" className={`sidebar ${mobileOpen ? 'open' : ''}`}>
       <a className="brand" href="#overview"><span className="brand-mark"><Wallet size={20} /></span><span>Friday<span className="brand-dot">.</span><small>AI FINANCE TRACKER</small></span></a>
       <div className="workspace-label">WORKSPACE</div>
       <nav className="sidebar-nav" aria-label="Main navigation">
-        {visibleNav.map(({ label, icon: Icon }) => <button key={label} className={`nav-item ${page === label ? 'selected' : ''}`} aria-current={page === label ? 'page' : undefined} onClick={() => { setPage(label); setMobileOpen(false) }}><Icon size={18} /><span>{label}</span>{label === 'Transactions' && <span className="nav-count">{activeTransactions.length}</span>}</button>)}
-        <button className={`nav-item ${page === 'Settings' ? 'selected' : ''}`} aria-current={page === 'Settings' ? 'page' : undefined} onClick={() => { setPage('Settings'); setMobileOpen(false) }}><Settings2 size={18} /><span>Settings</span></button>
-        <button className={`nav-item ${page === 'Help & privacy' ? 'selected' : ''}`} aria-current={page === 'Help & privacy' ? 'page' : undefined} onClick={() => { setPage('Help & privacy'); setMobileOpen(false) }}><CircleHelp size={18} /><span>Help & privacy</span></button>
+        {visibleNav.map(({ label, icon: Icon }) => <button key={label} className={`nav-item ${page === label ? 'selected' : ''}`} aria-current={page === label ? 'page' : undefined} onClick={() => { navigateTo(label); setMobileOpen(false) }}><Icon size={18} /><span>{label}</span>{label === 'Transactions' && <span className="nav-count">{activeTransactions.length}</span>}</button>)}
+        <button className={`nav-item ${page === 'Settings' ? 'selected' : ''}`} aria-current={page === 'Settings' ? 'page' : undefined} onClick={() => { navigateTo('Settings'); setMobileOpen(false) }}><Settings2 size={18} /><span>Settings</span></button>
+        <button className={`nav-item ${page === 'Help & privacy' ? 'selected' : ''}`} aria-current={page === 'Help & privacy' ? 'page' : undefined} onClick={() => { navigateTo('Help & privacy'); setMobileOpen(false) }}><CircleHelp size={18} /><span>Help & privacy</span></button>
       </nav>
       <div className="side-bottom">
         <div className="side-tip"><span className="tip-icon"><Sparkles size={16} /></span><b>A calmer way to track</b><p>Only your active, signed-in financial records appear here.</p></div>
@@ -554,13 +599,13 @@ export default function App() {
     </aside>
     {mobileOpen && <button className="scrim" aria-label="Close navigation" onClick={() => setMobileOpen(false)} />}
     <main className="main">
-      <header className="topbar"><button className="icon-button mobile-menu" aria-label="Open menu" onClick={() => setMobileOpen(true)}><MenuIcon /></button><div className="breadcrumbs">Workspace <span>/</span> <b>{page}</b></div><div className="top-actions"><div className="month-select"><CalendarDays size={15} /><span>{new Date().toLocaleDateString('en-IN', { month: 'long', year: 'numeric', timeZone: 'Asia/Kolkata' })}</span></div><button className="secondary" onClick={() => setAiOpen(true)}><Sparkles size={15} /> Ask Friday AI</button><button className="primary" onClick={() => setTransactionEditor({})}><Plus size={16} /> Add transaction</button></div></header>
+      <header className="topbar"><button className="icon-button mobile-menu" aria-label={mobileOpen ? 'Close menu' : 'Open menu'} aria-controls="primary-navigation" aria-expanded={mobileOpen} onClick={() => setMobileOpen((open) => !open)}><MenuIcon /></button><div className="breadcrumbs">Workspace <span>/</span> <b>{page}</b></div><div className="top-actions"><div className="month-select"><CalendarDays size={15} /><span>{new Date().toLocaleDateString('en-IN', { month: 'long', year: 'numeric', timeZone: 'Asia/Kolkata' })}</span></div><button className="secondary" aria-label="Ask Friday AI" onClick={() => setAiOpen(true)}><Sparkles size={15} /> Ask Friday AI</button><button className="primary" aria-label="Add transaction" onClick={() => setTransactionEditor({})}><Plus size={16} /> Add transaction</button></div></header>
       <div className="content">
         <div className="page-heading"><div><span className="eyebrow">{new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Asia/Kolkata' }).toUpperCase()}</span><h1>{page === 'Overview' ? 'Your financial picture' : page}</h1><p>{page === 'Overview' ? 'A clear view built from your active records and latest valuations.' : `Review and manage ${page.toLowerCase()} for your account.`}</p></div></div>
         {error && <div className="error-banner" role="alert">{error}<button onClick={() => setError('')} aria-label="Dismiss error"><X size={16} /></button></div>}
         {loading && <p className="muted-note" role="status">Refreshing your records…</p>}
         {page === 'Overview'
-          ? <Dashboard transactions={monthTransactions} categories={categories} budgets={budgets} goals={goals} holdings={holdings} assets={assets} liabilities={liabilities} assetValues={assetValues} holdingValues={holdingValues} preferences={profile?.dashboard_preferences ?? defaultDashboardPreferences} onAdd={() => setTransactionEditor({})} onPage={setPage} />
+          ? <><QuickActions actions={visibleQuickActions} onActivate={runQuickAction} /><Dashboard transactions={monthTransactions} categories={categories} budgets={budgets} goals={goals} holdings={holdings} assets={assets} liabilities={liabilities} assetValues={assetValues} holdingValues={holdingValues} preferences={preferenceSource} onAdd={() => setTransactionEditor({})} onPage={navigateTo} /></>
           : page === 'Help & privacy'
             ? <HelpPage />
             : page === 'Archive & Trash'
@@ -592,7 +637,8 @@ export default function App() {
               incomeSources={incomeSources}
               assetValues={assetValues}
               holdingValues={holdingValues}
-              profile={{ display_name: profile?.display_name ?? null, enabled_modules: activeModules, dashboard_preferences: profile?.dashboard_preferences ?? defaultDashboardPreferences }}
+              profile={{ display_name: profile?.display_name ?? null, enabled_modules: activeModules, dashboard_preferences: preferenceSource }}
+              onSettingsDirtyChange={setSettingsDirty}
               onOpenTransaction={(initial, transaction) => setTransactionEditor({ initial, transaction })}
               onSaveTransaction={saveTransaction}
               onSetDeleted={setDeleted}
@@ -641,7 +687,7 @@ function Dashboard({ transactions, categories, budgets, goals, holdings, assets,
   liabilities: LiabilityRow[]
   assetValues: Map<string, number>
   holdingValues: Map<string, number>
-  preferences: Record<string, boolean>
+  preferences: Record<string, unknown>
   onAdd: () => void
   onPage: (page: string) => void
 }) {
@@ -672,6 +718,7 @@ function Dashboard({ transactions, categories, budgets, goals, holdings, assets,
   const categoryData = [...expensesByCategory].map(([name, value]) => ({ name, value }))
   const spending = transactions.filter((item) => item.type === 'expense').reduce((sum, item) => addMoney(sum, Number(item.amount)), 0)
   const currentBudgets = budgets.filter((item) => !item.archived_at && !item.deleted_at && item.month_start === monthBoundsInKolkata().start)
+  const categoryBudgets = currentBudgets.filter((item) => item.category_id)
   const activeGoals = goals.filter((item) => !item.archived_at && !item.deleted_at)
   const goalSummaries = activeGoals.map((goal) => {
     const contributed = transactions.filter((item) => item.type === 'savings' && item.savings_goal_id === goal.id).reduce((sum, item) => addMoney(sum, Number(item.amount)), 0)
@@ -681,41 +728,58 @@ function Dashboard({ transactions, categories, budgets, goals, holdings, assets,
   const currentHoldings = holdings.filter((holding) => !holding.archived_at && !holding.deleted_at).reduce((sum, holding) => addMoney(sum, holdingValues.get(holding.id) ?? 0), 0)
   const currentLiabilities = liabilities.filter((item) => !item.archived_at && !item.deleted_at).reduce((sum, item) => addMoney(sum, Number(item.outstanding_balance)), 0)
   const contributions = transactions.filter((item) => item.type === 'investment').reduce((sum, item) => addMoney(sum, Number(item.amount)), 0)
-  const summaryCards = [
-    { title: 'Income this month', value: summary.income, icon: <ArrowDownLeft />, tone: 'mint' },
-    { title: 'Expenses this month', value: summary.expenses, icon: <ArrowUpRight />, tone: 'rose' },
-    { title: 'Cash flow after allocations', value: summary.cashFlow, icon: <Activity />, tone: 'blue' },
-    { title: 'Monthly budget left', value: summary.remainingBudget, icon: <CreditCard />, tone: 'amber' },
-  ]
-  const categoryBudgets = currentBudgets.filter((item) => item.category_id)
+  const dashboardOrder = orderedIds(preferences.dashboardOrder, DEFAULT_DASHBOARD_ORDER)
+  const summaryCards: Record<string, ReactNode> = {
+    income: <SummaryCard title="Income this month" amount={summary.income} icon={<ArrowDownLeft />} tone="mint" note="Active entries this month" className="dashboard-summary" />,
+    expenses: <SummaryCard title="Expenses this month" amount={summary.expenses} icon={<ArrowUpRight />} tone="rose" note="Active entries this month" className="dashboard-summary" />,
+  }
+  const showCard = (id: string) => preferences[id] !== false
+  const hasVisibleCards = DASHBOARD_CARDS.some(({ id }) => showCard(id))
+  const recentTransactions = [...transactions].sort((a, b) => b.occurred_on.localeCompare(a.occurred_on)).slice(0, 5)
+
+  const cards: Record<string, ReactNode> = {
+    ...summaryCards,
+    cashFlow: <section className="panel chart-panel dashboard-section"><PanelHeading title="Cash flow" description="Daily income and expenses from active entries" /><div className="dashboard-feature-value"><span>Cash flow after allocations</span><strong>{rupees(summary.cashFlow)}</strong></div><div className="chart-legend"><span><i className="dot income-dot" /> Income</span><span><i className="dot expense-dot" /> Expenses</span></div>{daily.length ? <div className="chart"><ResponsiveContainer width="100%" height="100%"><AreaChart data={daily} margin={{ top: 10, right: 8, left: -20, bottom: 0 }}><defs><linearGradient id="incomeFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--chart-income)" stopOpacity={.2} /><stop offset="95%" stopColor="var(--chart-income)" stopOpacity={0} /></linearGradient><linearGradient id="expenseFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--chart-expense)" stopOpacity={.15} /><stop offset="95%" stopColor="var(--chart-expense)" stopOpacity={0} /></linearGradient></defs><CartesianGrid stroke="var(--chart-grid)" vertical={false} /><XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fill: 'var(--chart-label)', fontSize: 11 }} tickFormatter={(value) => new Date(`${value}T12:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} /><Tooltip contentStyle={{ background: 'var(--chart-tooltip-bg)', border: '1px solid var(--color-border)', borderRadius: 10, color: 'var(--color-text-primary)' }} labelFormatter={(value) => String(value)} formatter={(value) => rupees(Number(value))} /><Area type="monotone" dataKey="income" stroke="var(--chart-income)" strokeWidth={2} fill="url(#incomeFill)" /><Area type="monotone" dataKey="expenses" stroke="var(--chart-expense)" strokeWidth={2} fill="url(#expenseFill)" /></AreaChart></ResponsiveContainer></div> : <EmptyState message="Cash-flow charts appear when you record transactions for this month." onAdd={onAdd} />}</section>,
+    monthlyBudget: <section className="panel budget-panel dashboard-section"><PanelHeading title="Monthly budgets" description="Progress from active expense entries" /><div className="dashboard-feature-value"><span>Overall budget remaining</span><strong>{summary.remainingBudget === null ? 'No overall budget set' : rupees(summary.remainingBudget)}</strong></div>{currentBudgets.length === 0 ? <EmptyState message="Set an overall or category budget to track your spending." onAdd={() => onPage('Budgets')} action="Manage budgets" /> : <div className="dashboard-list">{currentBudgets.map((budget) => {
+      const spent = budget.category_id
+        ? transactions.filter((item) => item.type === 'expense' && item.category_id === budget.category_id).reduce((sum, item) => addMoney(sum, Number(item.amount)), 0)
+        : spending
+      const limit = Number(budget.limit_amount)
+      const percent = limit > 0 ? spent / limit * 100 : null
+      return <div className="progress-item" key={budget.id}><div className="progress-caption"><b>{budget.categories?.name ?? 'Overall budget'}</b><span>{rupees(spent)} / {rupees(limit)}</span></div><ProgressBar value={percent ?? 0} /><div className="budget-foot"><span>{rupees(limit - spent)} remaining</span><span>{percent === null ? '—' : `${Math.round(percent)}%`}</span></div></div>
+    })}</div>}{categoryBudgets.length > 0 && <div className="dashboard-list category-budget-list"><h3>Category budgets</h3>{categoryBudgets.map((budget) => {
+      const spent = transactions.filter((item) => item.type === 'expense' && item.category_id === budget.category_id).reduce((sum, item) => addMoney(sum, Number(item.amount)), 0)
+      const limit = Number(budget.limit_amount)
+      return <div className="progress-item" key={budget.id}><div className="progress-caption"><b>{budget.categories?.name ?? 'Category'}</b><span>{rupees(spent)} / {rupees(limit)}</span></div><ProgressBar value={limit > 0 ? spent / limit * 100 : 0} /></div>
+    })}</div>}</section>,
+    categories: <section className="panel chart-panel dashboard-section"><PanelHeading title="Expense categories" description="Only active expense transactions in this month" />{categoryData.length ? <div className="category-chart"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={categoryData} dataKey="value" nameKey="name" innerRadius="58%" outerRadius="82%" paddingAngle={3}>{categoryData.map((item, index) => <Cell key={item.name} fill={csvColors[index % csvColors.length]} />)}</Pie><Tooltip formatter={(value) => rupees(Number(value))} contentStyle={{ background: 'var(--chart-tooltip-bg)', border: '1px solid var(--color-border)', borderRadius: 10, color: 'var(--color-text-primary)' }} /></PieChart></ResponsiveContainer><div className="category-legend">{categoryData.map((item, index) => <div key={item.name}><span><i className="dot" style={{ background: csvColors[index % csvColors.length] }} />{item.name}</span><b>{rupees(item.value)}</b></div>)}</div></div> : <EmptyState message="Expense categories will appear when active expenses are recorded." onAdd={onAdd} />}</section>,
+    savingsGoals: <section className="panel budget-panel dashboard-section"><PanelHeading title="Savings goals" description="Linked contributions from active savings entries" />{goalSummaries.length ? <div className="dashboard-list">{goalSummaries.map(({ goal, contributed, progress }) => <div className="progress-item" key={goal.id}><div className="progress-caption"><b>{goal.name}</b><span>{rupees(contributed)} / {rupees(Number(goal.target_amount))}</span></div><ProgressBar value={progress.percent ?? 0} /><div className="budget-foot"><span>{progress.outstanding === 0 ? 'Target reached' : `${rupees(progress.outstanding)} remaining`}</span><span>{Math.round(progress.percent ?? 0)}%</span></div></div>)}</div> : <EmptyState message="Create a savings goal and link contributions to it." onAdd={() => onPage('Savings')} action="Manage goals" />}</section>,
+    investments: <section className="panel transactions-panel dashboard-section"><PanelHeading title="Investments" description="Contributions are separate from the latest holdings valuation" /><div className="valuation-list"><div><span>Contributions this month</span><b>{rupees(contributions)}</b></div><div><span>Latest holdings valuations</span><b>{rupees(currentHoldings)}</b></div></div><button className="text-action" onClick={() => onPage('Investments')}>Manage holdings →</button></section>,
+    netWorth: <section className="panel networth-panel dashboard-section"><PanelHeading title="Estimated net worth" description="Latest asset and holding snapshots less active liabilities" /><div className="networth-value">{rupees(netWorth(currentAssets, currentHoldings, currentLiabilities))}</div><div className="valuation-list"><div><span><i className="asset-dot" /> Assets</span><b>{rupees(currentAssets)}</b></div><div><span><i className="asset-dot" /> Investment holdings</span><b>{rupees(currentHoldings)}</b></div><div><span><i className="liability-dot" /> Liabilities</span><b>{rupees(currentLiabilities)}</b></div></div><p className="disclaimer">An estimate from manually recorded balances, not a bank-verified statement.</p><button className="text-action" onClick={() => onPage('Assets & debts')}>Manage assets and debts →</button></section>,
+    recentTransactions: <section className="panel transactions-panel dashboard-section"><PanelHeading title="Recent transactions" description="Latest active entries in this month" />{recentTransactions.length ? <div className="transaction-list">{recentTransactions.map((item) => <div className="transaction-row" key={item.id}><div className={`transaction-icon ${item.type}`}><Activity size={15} /></div><div className="transaction-meta"><b>{item.description}</b><span>{item.categories?.name ?? 'Uncategorized'} · {item.occurred_on}</span></div><strong className={item.type === 'income' ? 'positive' : ''}>{item.type === 'income' ? '+' : '−'}{rupees(Number(item.amount))}</strong></div>)}</div> : <EmptyState message="There are no active entries for this month." onAdd={onAdd} />}</section>,
+  }
 
   return <>
-    <section className="summary-grid">{summaryCards.map((card) => <SummaryCard key={card.title} title={card.title} amount={card.value} icon={card.icon} tone={card.tone} note={card.title === 'Monthly budget left' && !overallBudget ? 'No overall budget set' : card.title === 'Monthly budget left' ? `${Math.round(summary.budgetPercent ?? 0)}% of budget used` : 'Active entries in this month'} />)}</section>
-    <div className="dashboard-grid">
-      {preferences.cashFlow !== false && <section className="panel chart-panel"><PanelHeading title="Cash flow" description="Daily income and expenses from active entries" /><div className="chart-legend"><span><i className="dot income-dot" /> Income</span><span><i className="dot expense-dot" /> Expenses</span></div>{daily.length ? <div className="chart"><ResponsiveContainer width="100%" height="100%"><AreaChart data={daily} margin={{ top: 10, right: 8, left: -20, bottom: 0 }}><defs><linearGradient id="incomeFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--chart-income)" stopOpacity={.2} /><stop offset="95%" stopColor="var(--chart-income)" stopOpacity={0} /></linearGradient><linearGradient id="expenseFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--chart-expense)" stopOpacity={.15} /><stop offset="95%" stopColor="var(--chart-expense)" stopOpacity={0} /></linearGradient></defs><CartesianGrid stroke="var(--chart-grid)" vertical={false} /><XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fill: 'var(--chart-label)', fontSize: 11 }} tickFormatter={(value) => new Date(`${value}T12:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} /><Tooltip contentStyle={{ background: 'var(--chart-tooltip-bg)', border: '1px solid var(--color-border)', borderRadius: 10, color: 'var(--color-text-primary)' }} labelFormatter={(value) => String(value)} formatter={(value) => rupees(Number(value))} /><Area type="monotone" dataKey="income" stroke="var(--chart-income)" strokeWidth={2} fill="url(#incomeFill)" /><Area type="monotone" dataKey="expenses" stroke="var(--chart-expense)" strokeWidth={2} fill="url(#expenseFill)" /></AreaChart></ResponsiveContainer></div> : <EmptyState message="Cash-flow charts appear when you record transactions for this month." onAdd={onAdd} />}</section>}
-      <section className="panel budget-panel"><PanelHeading title="Monthly budgets" description="Progress from active expense entries" />{currentBudgets.length === 0 ? <EmptyState message="Set an overall or category budget to track your spending." onAdd={() => onPage('Budgets')} action="Manage budgets" /> : <div className="dashboard-list">{currentBudgets.map((budget) => {
-        const spent = budget.category_id
-          ? transactions.filter((item) => item.type === 'expense' && item.category_id === budget.category_id).reduce((sum, item) => addMoney(sum, Number(item.amount)), 0)
-          : spending
-        const limit = Number(budget.limit_amount)
-        const percent = limit > 0 ? spent / limit * 100 : null
-        return <div className="progress-item" key={budget.id}><div className="progress-caption"><b>{budget.categories?.name ?? 'Overall budget'}</b><span>{rupees(spent)} / {rupees(limit)}</span></div><ProgressBar value={percent ?? 0} /><div className="budget-foot"><span>{rupees(limit - spent)} remaining</span><span>{percent === null ? '—' : `${Math.round(percent)}%`}</span></div></div>
-      })}</div>}</section>
-      {preferences.categories !== false && <section className="panel chart-panel"><PanelHeading title="Expense categories" description="Only active expense transactions in this month" />{categoryData.length ? <div className="category-chart"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={categoryData} dataKey="value" nameKey="name" innerRadius="58%" outerRadius="82%" paddingAngle={3}>{categoryData.map((item, index) => <Cell key={item.name} fill={csvColors[index % csvColors.length]} />)}</Pie><Tooltip formatter={(value) => rupees(Number(value))} contentStyle={{ background: 'var(--chart-tooltip-bg)', border: '1px solid var(--color-border)', borderRadius: 10, color: 'var(--color-text-primary)' }} /></PieChart></ResponsiveContainer><div className="category-legend">{categoryData.map((item, index) => <div key={item.name}><span><i className="dot" style={{ background: csvColors[index % csvColors.length] }} />{item.name}</span><b>{rupees(item.value)}</b></div>)}</div></div> : <EmptyState message="Expense categories will appear when active expenses are recorded." onAdd={onAdd} />}</section>}
-      {preferences.savingsGoals !== false && <section className="panel budget-panel"><PanelHeading title="Savings goals" description="Linked contributions from active savings entries" />{goalSummaries.length ? <div className="dashboard-list">{goalSummaries.map(({ goal, contributed, progress }) => <div className="progress-item" key={goal.id}><div className="progress-caption"><b>{goal.name}</b><span>{rupees(contributed)} / {rupees(Number(goal.target_amount))}</span></div><ProgressBar value={progress.percent ?? 0} /><div className="budget-foot"><span>{progress.outstanding === 0 ? 'Target reached' : `${rupees(progress.outstanding)} remaining`}</span><span>{Math.round(progress.percent ?? 0)}%</span></div></div>)}</div> : <EmptyState message="Create a savings goal and link contributions to it." onAdd={() => onPage('Savings')} action="Manage goals" />}</section>}
-      {preferences.investments !== false && <section className="panel transactions-panel"><PanelHeading title="Investments" description="Contributions are separate from the latest holdings valuation" /><div className="valuation-list"><div><span>Contributions this month</span><b>{rupees(contributions)}</b></div><div><span>Latest holdings valuations</span><b>{rupees(currentHoldings)}</b></div></div><button className="text-action" onClick={() => onPage('Investments')}>Manage holdings →</button></section>}
-      {preferences.netWorth !== false && <section className="panel networth-panel"><PanelHeading title="Estimated net worth" description="Latest asset and holding snapshots less active liabilities" /><div className="networth-value">{rupees(netWorth(currentAssets, currentHoldings, currentLiabilities))}</div><div className="valuation-list"><div><span><i className="asset-dot" /> Assets</span><b>{rupees(currentAssets)}</b></div><div><span><i className="asset-dot" /> Investment holdings</span><b>{rupees(currentHoldings)}</b></div><div><span><i className="liability-dot" /> Liabilities</span><b>{rupees(currentLiabilities)}</b></div></div><p className="disclaimer">An estimate from manually recorded balances, not a bank-verified statement.</p><button className="text-action" onClick={() => onPage('Assets & debts')}>Manage assets and debts →</button></section>}
-      {categoryBudgets.length > 0 && <section className="panel transactions-panel"><PanelHeading title="Category budget progress" description="Category limits compared with current-month expenses" />{categoryBudgets.map((budget) => {
-        const spent = transactions.filter((item) => item.type === 'expense' && item.category_id === budget.category_id).reduce((sum, item) => addMoney(sum, Number(item.amount)), 0)
-        const limit = Number(budget.limit_amount)
-        return <div className="progress-item" key={budget.id}><div className="progress-caption"><b>{budget.categories?.name ?? 'Category'}</b><span>{rupees(spent)} / {rupees(limit)}</span></div><ProgressBar value={limit > 0 ? spent / limit * 100 : 0} /></div>
-      })}</section>}
-      {categories.length > 0 && <section className="panel transactions-panel"><PanelHeading title="Recent transactions" description="Latest active entries in this month" />{transactions.length ? <div className="transaction-list">{[...transactions].sort((a, b) => b.occurred_on.localeCompare(a.occurred_on)).slice(0, 5).map((item) => <div className="transaction-row" key={item.id}><div className={`transaction-icon ${item.type}`}><Activity size={15} /></div><div className="transaction-meta"><b>{item.description}</b><span>{item.categories?.name ?? 'Uncategorized'} · {item.occurred_on}</span></div><strong className={item.type === 'income' ? 'positive' : ''}>{item.type === 'income' ? '+' : '−'}{rupees(Number(item.amount))}</strong></div>)}</div> : <EmptyState message="There are no active entries for this month." onAdd={onAdd} />}</section>}
-    </div>
+    {hasVisibleCards ? <div className="dashboard-layout">{dashboardOrder.filter(showCard).map((id) => <Fragment key={id}>{cards[id]}</Fragment>)}</div> : <section className="dashboard-empty panel" aria-labelledby="dashboard-empty-title"><h2 id="dashboard-empty-title">Your dashboard is clear</h2><p>All dashboard cards are hidden. Your financial records are safe and unchanged.</p><button className="primary" onClick={() => onPage('Settings')}>Customize dashboard</button></section>}
     <span className="sr-only">Active categories: {categories.filter((item) => !item.archived_at).length}</span>
   </>
 }
 
+function QuickActions({ actions, onActivate }: { actions: string[]; onActivate: (id: string) => void }) {
+  if (!actions.length) return null
+  return <section className="quick-actions" aria-labelledby="quick-actions-heading"><h2 id="quick-actions-heading">Quick actions</h2><div>{actions.map((id) => {
+    const action = QUICK_ACTIONS.find((item) => item.id === id)
+    if (!action) return null
+    const icon = action.type === 'income' ? <ArrowDownLeft size={17} />
+      : action.type === 'expense' ? <ArrowUpRight size={17} />
+        : action.type === 'investment' ? <BriefcaseBusiness size={17} />
+          : action.type === 'savings' ? <Wallet size={17} />
+            : action.id === 'addBudget' ? <ChartNoAxesCombined size={17} />
+              : action.id === 'addAsset' ? <CreditCard size={17} />
+                : <Plus size={17} />
+    return <button type="button" className="secondary" key={id} onClick={() => onActivate(id)}>{icon}<span>{action.label}</span></button>
+  })}</div></section>
+}
 export function AiDialog({ accessToken, categories, incomeSources, transactions, goals, onClose, onSaveBatch, onSaveTransaction, onSetDeleted, aiAdapter }: {
   accessToken: string
   categories: CategoryRow[]
@@ -1002,6 +1066,8 @@ export function Onboarding({ onComplete, onSignOut, error }: { onComplete: (data
         displayName: String(form.get('display_name')).trim(),
         enabledModules: defaultModules.filter((module) => form.get(`module-${module}`) === 'on'),
         dashboardPreferences: {
+          modulePreferencesVersion: 1,
+          modulePreferencesSaved: true,
           cashFlow: form.get('pref-cashFlow') === 'on',
           categories: form.get('pref-categories') === 'on',
           savingsGoals: form.get('pref-savingsGoals') === 'on',
@@ -1069,8 +1135,8 @@ function HelpPage() {
   return <section className="workspace-page panel"><PanelHeading title="Help & privacy" description="How this app treats your financial information." /><ul className="help-list"><li>Financial records are stored in your Supabase project and protected by row-level security.</li><li>The Supabase publishable key is intended for browser use; the database policies are the access boundary.</li><li>AI entry sends the text you submit to Cloudflare Workers AI for parsing. No record is written until you confirm the preview.</li><li>AI update/delete proposals search your signed-in active transactions; the model never supplies database IDs or SQL.</li><li>All entered values are manual estimates. There are no bank connections, live market prices, tax calculations, or automatic valuations.</li><li>Archived records are hidden from active views and can be restored; deleted transactions are moved to trash, not permanently removed.</li></ul></section>
 }
 
-function SummaryCard({ title, amount, icon, tone, note }: { title: string; amount: number | null; icon: ReactNode; tone: string; note: string }) {
-  return <div className="summary-card panel"><div className="summary-top"><span>{title}</span><span className={`summary-icon ${tone}`}>{icon}</span></div><div className="summary-amount">{amount === null ? '—' : rupees(amount)}</div><div className="summary-note">{note}</div></div>
+function SummaryCard({ title, amount, icon, tone, note, className = '' }: { title: string; amount: number | null; icon: ReactNode; tone: string; note: string; className?: string }) {
+  return <div className={`summary-card panel ${className}`}><div className="summary-top"><span>{title}</span><span className={`summary-icon ${tone}`}>{icon}</span></div><div className="summary-amount">{amount === null ? '—' : rupees(amount)}</div><div className="summary-note">{note}</div></div>
 }
 function PanelHeading({ title, description }: { title: string; description: string }) {
   return <div className="panel-header"><div><h2>{title}</h2><p>{description}</p></div></div>

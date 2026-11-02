@@ -1,7 +1,8 @@
-import { useMemo, useState, type FormEvent } from 'react'
-import { Moon, Sun } from 'lucide-react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { ArrowDown, ArrowUp, Check, Moon, RotateCcw, Save, Sun, X } from 'lucide-react'
 import { useTheme } from '../theme-context'
-import { goalProgress, rupees, type FinanceTransaction } from '../lib/finance'
+import { addMoney, goalProgress, rupees, type FinanceTransaction } from '../lib/finance'
+import { DASHBOARD_CARDS, DEFAULT_DASHBOARD_ORDER, DEFAULT_MODULE_ORDER, DEFAULT_QUICK_ACTIONS, DEFAULT_WORKSPACE_MODULES, QUICK_ACTIONS, WORKSPACE_MODULES, normalizeDashboardPreferences, normalizeEnabledModules, orderedIds, preferenceValue, selectedIds } from '../lib/preferences'
 
 export type TransactionType = FinanceTransaction['type']
 export type CategoryRow = { id: string; type: TransactionType; name: string; archived_at: string | null; deleted_at?: string | null; trashed_from_archived_at?: string | null }
@@ -73,13 +74,15 @@ export type FinancePagesProps = {
   onArchiveHolding: (id: string, archived: boolean) => Promise<void>
   onSaveLiability: (draft: LiabilityDraft, id?: string) => Promise<void>
   onArchiveLiability: (id: string, archived: boolean) => Promise<void>
-  onSaveProfile: (displayName: string, enabledModules: string[], dashboardPreferences: Record<string, boolean>) => Promise<void>
-  profile: { display_name: string | null; enabled_modules: string[]; dashboard_preferences: Record<string, boolean> }
+  onSaveProfile: (displayName: string, enabledModules: string[], dashboardPreferences: Record<string, unknown>) => Promise<void>
+  onSettingsDirtyChange?: (dirty: boolean) => void
+  profile: { display_name: string | null; enabled_modules: string[]; dashboard_preferences: Record<string, unknown> }
 }
 
 export function FinancePages(props: FinancePagesProps) {
   switch (props.page) {
     case 'Transactions': return <TransactionsPage {...props} />
+    case 'Reports': return <ReportsPage {...props} />
     case 'Budgets': return <BudgetsPage {...props} />
     case 'Savings': return <GoalsPage {...props} />
     case 'Investments': return <InvestmentsPage {...props} />
@@ -88,6 +91,67 @@ export function FinancePages(props: FinancePagesProps) {
     case 'Settings': return <SettingsPage {...props} />
     default: return null
   }
+}
+
+function ReportsPage({ transactions }: FinancePagesProps) {
+  const [periodType, setPeriodType] = useState<'month' | 'year'>('month')
+  const [month, setMonth] = useState(currentMonth())
+  const [year, setYear] = useState(String(new Date().getFullYear()))
+  const chosen = periodType === 'month' ? month : year
+  const rangeFor = (value: string) => {
+    if (periodType === 'year') return { start: `${value}-01-01`, end: `${value}-12-31`, label: value }
+    const [y, m] = value.split('-').map(Number)
+    const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate()
+    return { start: `${value}-01`, end: `${value}-${String(lastDay).padStart(2, '0')}`, label: new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString('en-IN', { month: 'long', year: 'numeric', timeZone: 'UTC' }) }
+  }
+  const adjacent = (value: string, offset: number) => {
+    if (periodType === 'year') return String(Number(value) + offset)
+    const [y, m] = value.split('-').map(Number)
+    const date = new Date(Date.UTC(y, m - 1 + offset, 1))
+    return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`
+  }
+  const current = rangeFor(chosen)
+  const previous = rangeFor(adjacent(chosen, -1))
+  const totalsFor = (range: { start: string; end: string }) => {
+    const totals: Record<TransactionType, number> = { income: 0, expense: 0, investment: 0, savings: 0 }
+    const categoryTotals = new Map<string, number>()
+    for (const row of transactions) {
+      if (row.deleted_at || row.occurred_on < range.start || row.occurred_on > range.end) continue
+      totals[row.type] = addMoney(totals[row.type], Number(row.amount))
+      if (row.type === 'expense') {
+        const category = row.categories?.name ?? 'Uncategorized'
+        categoryTotals.set(category, addMoney(categoryTotals.get(category) ?? 0, Number(row.amount)))
+      }
+    }
+    return { totals, categoryTotals }
+  }
+  const currentData = totalsFor(current)
+  const previousData = totalsFor(previous)
+  const cashFlowFor = (totals: Record<TransactionType, number>) => addMoney(addMoney(addMoney(totals.income, -totals.expense), -totals.savings), -totals.investment)
+  const metrics: Array<{ label: string; key: TransactionType | 'cashFlow'; current: number; previous: number }> = [
+    { label: 'Income', key: 'income', current: currentData.totals.income, previous: previousData.totals.income },
+    { label: 'Expenses', key: 'expense', current: currentData.totals.expense, previous: previousData.totals.expense },
+    { label: 'Savings contributions', key: 'savings', current: currentData.totals.savings, previous: previousData.totals.savings },
+    { label: 'Investment contributions', key: 'investment', current: currentData.totals.investment, previous: previousData.totals.investment },
+    { label: 'Cash flow after allocations', key: 'cashFlow', current: cashFlowFor(currentData.totals), previous: cashFlowFor(previousData.totals) },
+  ]
+  const categoryRows = [...new Set([...currentData.categoryTotals.keys(), ...previousData.categoryTotals.keys()])]
+    .map((name) => ({ name, current: currentData.categoryTotals.get(name) ?? 0, previous: previousData.categoryTotals.get(name) ?? 0 }))
+    .sort((a, b) => b.current - a.current)
+  const hasTransactions = metrics.some(({ current: amount }) => amount !== 0) || metrics.some(({ previous: amount }) => amount !== 0)
+  return <section className="workspace-page panel report-page" aria-labelledby="reports-title">
+    <PageHeading id="reports-title" title="Reports" description="Compare recorded income, spending, savings, and investment contributions across periods." />
+    <div className="report-controls">
+      <label>Compare by<select value={periodType} onChange={(event) => setPeriodType(event.target.value as 'month' | 'year')}><option value="month">Month</option><option value="year">Year</option></select></label>
+      {periodType === 'month' ? <label>Selected month<input type="month" value={month} onChange={(event) => setMonth(event.target.value)} /></label> : <label>Selected year<input type="number" min="2000" max="2100" value={year} onChange={(event) => setYear(event.target.value)} /></label>}
+    </div>
+    {hasTransactions ? <>
+      <div className="report-period-headings"><h2>{current.label}</h2><span>compared with</span><h2>{previous.label}</h2></div>
+      <div className="report-metrics">{metrics.map((metric) => { const change = addMoney(metric.current, -metric.previous); return <article className="report-metric" key={metric.key}><h3>{metric.label}</h3><div className="report-values"><strong>{rupees(metric.current)}</strong><span>{rupees(metric.previous)}</span></div><small>{change > 0 ? '+' : ''}{rupees(change)} change</small></article> })}</div>
+      <section className="report-categories" aria-labelledby="report-categories-title"><h2 id="report-categories-title">Expense categories</h2>{categoryRows.length ? <div className="table-scroll"><table><thead><tr><th>Category</th><th>{current.label}</th><th>{previous.label}</th><th>Change</th></tr></thead><tbody>{categoryRows.map((row) => { const change = addMoney(row.current, -row.previous); return <tr key={row.name}><th scope="row">{row.name}</th><td>{rupees(row.current)}</td><td>{rupees(row.previous)}</td><td>{change > 0 ? '+' : ''}{rupees(change)}</td></tr> })}</tbody></table></div> : <p className="muted-note">No expense categories were recorded in these periods.</p>}</section>
+    </> : <div className="report-empty"><div className="report-period-headings"><h2>{current.label}</h2><span>compared with</span><h2>{previous.label}</h2></div><h2>No transactions in these periods</h2><p>Record entries for {current.label} or {previous.label} to see a comparison here.</p></div>}
+    <p className="muted-note">Reports use active transaction records. Deleted entries are excluded. Asset and holding valuation snapshots are not included in these transaction totals.</p>
+  </section>
 }
 
 function TransactionsPage({ transactions, categories, goals, onOpenTransaction, onSetDeleted }: FinancePagesProps) {
@@ -324,40 +388,260 @@ function AssetsPage({ assets, liabilities, assetValues, onSaveAsset, onArchiveAs
   </div>
 }
 
-function SettingsPage({ profile, onSaveProfile }: FinancePagesProps) {
+type SettingsDraft = {
+  displayName: string
+  enabledModules: string[]
+  preferences: Record<string, unknown>
+}
+
+function createSettingsDraft(profile: FinancePagesProps['profile']): SettingsDraft {
+  const preferences = normalizeDashboardPreferences(profile.dashboard_preferences)
+  return {
+    displayName: typeof profile.display_name === 'string' ? profile.display_name : '',
+    enabledModules: normalizeEnabledModules(profile.enabled_modules, preferences.modulePreferencesSaved === true, Number(preferences.modulePreferencesVersion ?? 0)),
+    preferences,
+  }
+}
+
+function SettingsPage({ profile, onSaveProfile, onSettingsDirtyChange }: FinancePagesProps) {
   const { theme, setTheme } = useTheme()
+  const [draft, setDraft] = useState(() => createSettingsDraft(profile))
+  const [savedDraft, setSavedDraft] = useState(() => createSettingsDraft(profile))
   const [saving, setSaving] = useState(false)
-  async function save(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const form = new FormData(event.currentTarget)
+  const [confirmReset, setConfirmReset] = useState(false)
+  const [status, setStatus] = useState('')
+  const [statusIsError, setStatusIsError] = useState(false)
+  const dirty = JSON.stringify(draft) !== JSON.stringify(savedDraft)
+  const savedScale = preferenceValue(savedDraft.preferences.fontScale, ['small', 'medium', 'large'] as const, 'medium')
+  const savedDensity = preferenceValue(savedDraft.preferences.density, ['comfortable', 'compact'] as const, 'comfortable')
+  const fontScale = preferenceValue(draft.preferences.fontScale, ['small', 'medium', 'large'] as const, 'medium')
+  const density = preferenceValue(draft.preferences.density, ['comfortable', 'compact'] as const, 'comfortable')
+  const dashboardOrder = orderedIds(draft.preferences.dashboardOrder, DEFAULT_DASHBOARD_ORDER)
+  const moduleOrder = orderedIds(draft.preferences.moduleOrder, DEFAULT_MODULE_ORDER)
+  const quickActionOrder = orderedIds(draft.preferences.quickActionOrder, QUICK_ACTIONS.map(({ id }) => id))
+  const allQuickActionIds = QUICK_ACTIONS.map(({ id }) => id)
+  const selectedQuickActions = selectedIds(draft.preferences.quickActions, DEFAULT_QUICK_ACTIONS, allQuickActionIds)
+  const displayedQuickActions = quickActionOrder.filter((id) => selectedQuickActions.includes(id))
+  const dashboardVisible = dashboardOrder.filter((id) => draft.preferences[id] !== false)
+
+  useEffect(() => {
+    document.documentElement.dataset.fontScale = fontScale
+    document.documentElement.dataset.density = density
+  }, [fontScale, density])
+
+  useEffect(() => {
+    onSettingsDirtyChange?.(dirty)
+  }, [dirty, onSettingsDirtyChange])
+
+  useEffect(() => () => {
+    document.documentElement.dataset.fontScale = savedScale
+    document.documentElement.dataset.density = savedDensity
+  }, [savedScale, savedDensity])
+
+  function updatePreferences(update: (current: Record<string, unknown>) => Record<string, unknown>) {
+    setStatus('')
+    setStatusIsError(false)
+    setDraft((current) => ({ ...current, preferences: update(current.preferences) }))
+  }
+
+  function updateOrdered(listKey: 'dashboardOrder' | 'moduleOrder' | 'quickActionOrder', id: string, direction: -1 | 1) {
+    updatePreferences((preferences) => {
+      const order = orderedIds(preferences[listKey], listKey === 'dashboardOrder' ? DEFAULT_DASHBOARD_ORDER : listKey === 'moduleOrder' ? DEFAULT_MODULE_ORDER : QUICK_ACTIONS.map(({ id }) => id))
+      const index = order.indexOf(id)
+      const nextIndex = index + direction
+      if (index < 0 || nextIndex < 0 || nextIndex >= order.length) return preferences
+      const next = [...order]
+      ;[next[index], next[nextIndex]] = [next[nextIndex], next[index]]
+      return { ...preferences, [listKey]: next }
+    })
+  }
+
+  function toggleModule(id: string, enabled: boolean) {
+    setStatus('')
+    setDraft((current) => ({
+      ...current,
+      enabledModules: enabled
+        ? [...new Set([...current.enabledModules, id])]
+        : current.enabledModules.filter((module) => module !== id),
+      preferences: { ...current.preferences, modulePreferencesSaved: true },
+    }))
+  }
+
+  function restoreDashboard() {
+    updatePreferences((preferences) => ({
+      ...preferences,
+      ...Object.fromEntries(DASHBOARD_CARDS.map(({ id }) => [id, true])),
+      dashboardOrder: [...DEFAULT_DASHBOARD_ORDER],
+    }))
+  }
+
+  function restoreModules() {
+    setStatus('')
+    setDraft((current) => ({
+      ...current,
+      enabledModules: [...DEFAULT_WORKSPACE_MODULES],
+      preferences: { ...current.preferences, moduleOrder: [...DEFAULT_MODULE_ORDER], modulePreferencesSaved: true, modulePreferencesVersion: 1 },
+    }))
+  }
+
+  function restoreQuickActions() {
+    updatePreferences((preferences) => ({
+      ...preferences,
+      quickActions: [...DEFAULT_QUICK_ACTIONS],
+      quickActionOrder: QUICK_ACTIONS.map(({ id }) => id),
+    }))
+  }
+
+  function restoreAll() {
+    setDraft({
+      displayName: savedDraft.displayName,
+      enabledModules: [...DEFAULT_WORKSPACE_MODULES],
+      preferences: {
+        ...savedDraft.preferences,
+        ...Object.fromEntries(DASHBOARD_CARDS.map(({ id }) => [id, true])),
+        dashboardOrder: [...DEFAULT_DASHBOARD_ORDER],
+        moduleOrder: [...DEFAULT_MODULE_ORDER],
+        modulePreferencesSaved: true,
+        modulePreferencesVersion: 1,
+        quickActions: [...DEFAULT_QUICK_ACTIONS],
+        quickActionOrder: QUICK_ACTIONS.map(({ id }) => id),
+        fontScale: 'medium',
+        density: 'comfortable',
+      },
+    })
+    setConfirmReset(false)
+    setStatus('Defaults restored. Save changes to apply them to your workspace.')
+  }
+
+  function cancelChanges() {
+    setDraft(savedDraft)
+    setStatus('Changes discarded.')
+    setStatusIsError(false)
+  }
+
+  async function saveChanges() {
+    if (!dirty) return
     setSaving(true)
+    setStatus('')
     try {
-      await onSaveProfile(String(form.get('display_name')).trim(), moduleNames.filter((module) => form.get(`module-${module}`) === 'on'), {
-        cashFlow: form.get('pref-cashFlow') === 'on',
-        categories: form.get('pref-categories') === 'on',
-        savingsGoals: form.get('pref-savingsGoals') === 'on',
-        investments: form.get('pref-investments') === 'on',
-        netWorth: form.get('pref-netWorth') === 'on',
-      })
-    } catch {
-      return
+      const preferences = {
+        ...draft.preferences,
+        ...Object.fromEntries(DASHBOARD_CARDS.map(({ id }) => [id, draft.preferences[id] !== false])),
+        dashboardOrder,
+        moduleOrder,
+        modulePreferencesSaved: true,
+        modulePreferencesVersion: 1,
+        quickActions: displayedQuickActions,
+        quickActionOrder,
+        fontScale,
+        density,
+      }
+      const nextDraft = { ...draft, preferences }
+      await onSaveProfile(draft.displayName.trim(), draft.enabledModules, preferences)
+      setDraft(nextDraft)
+      setSavedDraft(nextDraft)
+      setStatus('Your workspace preferences are saved.')
+      setStatusIsError(false)
+    } catch (failure) {
+      setStatus(failure instanceof Error ? `Could not save changes: ${failure.message}` : 'Could not save changes. Try again.')
+      setStatusIsError(true)
     } finally {
       setSaving(false)
     }
   }
-  return <section className="workspace-page panel"><PageHeading id="settings-title" title="Settings" description="Choose enabled sections and the dashboard cards shown in your workspace." />
-    <section className="appearance-section" aria-labelledby="appearance-title">
-      <div className="appearance-heading"><div><h2 id="appearance-title">Appearance</h2><p>Customize how Friday AI Finance looks on your device.</p></div><span className="current-theme">Current theme: <strong>{theme === 'dark' ? 'Dark' : 'Light'}</strong></span></div>
-      <div className="theme-options" role="group" aria-label="Theme preference">
-        <button type="button" className={`theme-option ${theme === 'dark' ? 'selected' : ''}`} aria-label="Dark theme. A comfortable dark interface." aria-pressed={theme === 'dark'} onClick={() => setTheme('dark')}>
-          <span className="theme-option-icon"><Moon size={19} aria-hidden="true" /></span><span className="theme-option-copy"><strong>Dark</strong><small>A comfortable dark interface.</small></span><span className="theme-selected-mark" aria-hidden="true">{theme === 'dark' ? 'Selected' : ''}</span>
-        </button>
-        <button type="button" className={`theme-option ${theme === 'light' ? 'selected' : ''}`} aria-label="Light theme. A clean, bright interface." aria-pressed={theme === 'light'} onClick={() => setTheme('light')}>
-          <span className="theme-option-icon"><Sun size={19} aria-hidden="true" /></span><span className="theme-option-copy"><strong>Light</strong><small>A clean, bright interface.</small></span><span className="theme-selected-mark" aria-hidden="true">{theme === 'light' ? 'Selected' : ''}</span>
-        </button>
+
+  const moveButtons = (listKey: 'dashboardOrder' | 'moduleOrder' | 'quickActionOrder', order: string[], id: string, label = id) => {
+    const index = order.indexOf(id)
+    return <span className="settings-order-controls">
+      <button type="button" className="icon-button" aria-label={`Move ${label} up`} disabled={index === 0} onClick={() => updateOrdered(listKey, id, -1)}><ArrowUp size={16} /></button>
+      <button type="button" className="icon-button" aria-label={`Move ${label} down`} disabled={index === order.length - 1} onClick={() => updateOrdered(listKey, id, 1)}><ArrowDown size={16} /></button>
+    </span>
+  }
+
+  return <section className="workspace-page panel settings-page" aria-labelledby="settings-title">
+    <PageHeading id="settings-title" title="Settings" description="Make Friday feel right for the way you manage money." />
+
+    <section className="settings-section" aria-labelledby="appearance-title">
+      <div className="settings-section-heading"><div><h2 id="appearance-title">Appearance</h2><p>Choose a comfortable look and reading size. Theme changes apply immediately.</p></div></div>
+      <div className="settings-subsection">
+        <div className="settings-subheading"><h3>Theme</h3><span className="current-theme">Current: <strong>{theme === 'dark' ? 'Dark' : 'Light'}</strong></span></div>
+        <div className="theme-options" role="group" aria-label="Theme preference">
+          <button type="button" className={`theme-option ${theme === 'dark' ? 'selected' : ''}`} aria-label="Dark theme" aria-pressed={theme === 'dark'} onClick={() => setTheme('dark')}>
+            <span className="theme-option-icon"><Moon size={19} aria-hidden="true" /></span><span className="theme-option-copy"><strong>Dark</strong><small>A comfortable dark interface.</small></span><span className="theme-selected-mark" aria-hidden="true">{theme === 'dark' ? 'Selected' : ''}</span>
+          </button>
+          <button type="button" className={`theme-option ${theme === 'light' ? 'selected' : ''}`} aria-label="Light theme" aria-pressed={theme === 'light'} onClick={() => setTheme('light')}>
+            <span className="theme-option-icon"><Sun size={19} aria-hidden="true" /></span><span className="theme-option-copy"><strong>Light</strong><small>A clean, bright interface.</small></span><span className="theme-selected-mark" aria-hidden="true">{theme === 'light' ? 'Selected' : ''}</span>
+          </button>
+        </div>
+      </div>
+      <div className="settings-choice-grid">
+        <fieldset className="settings-choice-group"><legend>Font size</legend><p>Preview text sizing as you choose.</p><div role="group" aria-label="Font size" className="settings-segmented">{(['small', 'medium', 'large'] as const).map((scale) => <button type="button" key={scale} aria-pressed={fontScale === scale} className={fontScale === scale ? 'selected' : ''} onClick={() => updatePreferences((preferences) => ({ ...preferences, fontScale: scale }))}>{titleCase(scale)}{scale === 'medium' ? ' · Default' : ''}</button>)}</div></fieldset>
+        <fieldset className="settings-choice-group"><legend>Interface density</legend><p>Choose the amount of space between items.</p><div role="group" aria-label="Interface density" className="settings-segmented">{(['comfortable', 'compact'] as const).map((mode) => <button type="button" key={mode} aria-pressed={density === mode} className={density === mode ? 'selected' : ''} onClick={() => updatePreferences((preferences) => ({ ...preferences, density: mode }))}>{titleCase(mode)}{mode === 'comfortable' ? ' · Default' : ''}</button>)}</div></fieldset>
+      </div>
+      <div className="settings-foundations" aria-label="Display preferences"><span>Display preferences</span><ul><li><Check size={15} /> Consistent card spacing</li><li><Check size={15} /> Readable typography</li><li><Check size={15} /> Responsive layout</li></ul><p>These accessibility foundations stay on at every font size and density.</p></div>
+    </section>
+
+    <section className="settings-section" aria-labelledby="dashboard-settings-title">
+      <div className="settings-section-heading"><div><h2 id="dashboard-settings-title">Customize Dashboard</h2><p>Choose which dashboard cards appear and arrange them in the order that works for you.</p></div><button type="button" className="secondary settings-reset-button" onClick={restoreDashboard}><RotateCcw size={15} /> Restore default arrangement</button></div>
+      <div className="settings-editor-grid">
+        <div className="settings-control-list" role="list" aria-label="Dashboard cards">
+          {dashboardOrder.map((id) => {
+            const card = DASHBOARD_CARDS.find((item) => item.id === id)!
+            return <div className="settings-control-row" role="listitem" key={id}>
+              <label className="settings-toggle"><input type="checkbox" checked={draft.preferences[id] !== false} onChange={(event) => updatePreferences((preferences) => ({ ...preferences, [id]: event.target.checked }))} /><span>{card.label}</span></label>
+              {moveButtons('dashboardOrder', dashboardOrder, id, card.label)}
+            </div>
+          })}
+        </div>
+        <aside className="settings-preview" aria-label="Dashboard arrangement preview"><h3>Preview</h3>{dashboardVisible.length ? <ol>{dashboardVisible.map((id) => <li key={id}>{DASHBOARD_CARDS.find((card) => card.id === id)?.label}</li>)}</ol> : <div className="settings-empty"><b>No dashboard cards selected</b><p>Your financial records stay safe. Restore the default arrangement to show your cards again.</p><button type="button" className="text-action" onClick={restoreDashboard}>Restore dashboard defaults</button></div>}</aside>
       </div>
     </section>
-    <form className="settings-form" onSubmit={(event) => void save(event)}><label>Display name<input name="display_name" maxLength={100} defaultValue={profile.display_name ?? ''} /></label><fieldset><legend>Enabled modules</legend>{moduleNames.map((module) => <label className="checkbox-label" key={module}><input type="checkbox" name={`module-${module}`} defaultChecked={profile.enabled_modules.includes(module)} />{titleCase(module)}</label>)}</fieldset><fieldset><legend>Dashboard cards</legend>{dashboardCards.map(([key, label]) => <label className="checkbox-label" key={key}><input type="checkbox" name={`pref-${key}`} defaultChecked={profile.dashboard_preferences[key] !== false} />{label}</label>)}</fieldset><button className="primary" disabled={saving}>{saving ? 'Saving…' : 'Save preferences'}</button></form>
+
+    <section className="settings-section" aria-labelledby="workspace-settings-title">
+      <div className="settings-section-heading"><div><h2 id="workspace-settings-title">Manage Workspace</h2><p>Hide pages you do not use. This only changes navigation; it never deletes records.</p></div><button type="button" className="secondary settings-reset-button" onClick={restoreModules}><RotateCcw size={15} /> Restore default modules</button></div>
+      <div className="settings-protected-note"><b>Always available</b><span>Overview and Settings stay accessible. Authentication, sign-out, account recovery, and data authorization are not affected by module choices.</span></div>
+      <div className="settings-control-list" role="list" aria-label="Workspace modules">
+        <div className="settings-control-row protected" role="listitem"><span className="settings-toggle-copy"><strong>Overview</strong><small>Your financial dashboard</small></span><span className="settings-always-on">Always on</span></div>
+        {moduleOrder.map((id) => {
+          const module = WORKSPACE_MODULES.find((item) => item.id === id)!
+          return <div className={`settings-control-row settings-module-row ${draft.enabledModules.includes(id) ? 'active' : ''}`} role="listitem" key={id}>
+            <label className="settings-toggle"><input type="checkbox" aria-label={module.label} aria-describedby={`module-${id}-description`} checked={draft.enabledModules.includes(id)} onChange={(event) => toggleModule(id, event.target.checked)} /><span><strong>{module.label}</strong><small id={`module-${id}-description`}>{module.description}</small></span></label>
+            <span className="settings-module-status">{draft.enabledModules.includes(id) ? 'Active' : 'Hidden'}</span>
+            {moveButtons('moduleOrder', moduleOrder, id, module.label)}
+          </div>
+        })}
+      </div>
+    </section>
+
+    <section className="settings-section" aria-labelledby="quick-actions-title">
+      <div className="settings-section-heading"><div><h2 id="quick-actions-title">Quick Actions</h2><p>Choose shortcuts for the overview. The original pages and Add transaction button remain available.</p></div><button type="button" className="secondary settings-reset-button" onClick={restoreQuickActions}><RotateCcw size={15} /> Restore defaults</button></div>
+      <div className="settings-control-list" role="list" aria-label="Quick actions">
+        {quickActionOrder.map((id) => {
+          const action = QUICK_ACTIONS.find((item) => item.id === id)!
+          return <div className="settings-control-row" role="listitem" key={id}>
+            <label className="settings-toggle"><input type="checkbox" checked={selectedQuickActions.includes(id)} onChange={(event) => updatePreferences((preferences) => {
+              const selected = selectedIds(preferences.quickActions, DEFAULT_QUICK_ACTIONS, allQuickActionIds)
+              return { ...preferences, quickActions: event.target.checked ? [...selected, id] : selected.filter((item) => item !== id) }
+            })} /><span>{action.label}</span></label>
+            {moveButtons('quickActionOrder', quickActionOrder, id, action.label)}
+          </div>
+        })}
+      </div>
+      {displayedQuickActions.length === 0 && <div className="settings-empty"><b>No quick actions selected</b><p>You can still add records from their original pages.</p><button type="button" className="text-action" onClick={restoreQuickActions}>Restore quick action defaults</button></div>}
+      {displayedQuickActions.length > 0 && <div className="settings-preview-action"><h3>Preview</h3><div>{displayedQuickActions.map((id) => <span key={id}>{QUICK_ACTIONS.find((action) => action.id === id)?.label}</span>)}</div></div>}
+    </section>
+
+    <section className="settings-section" aria-labelledby="account-settings-title">
+      <div className="settings-section-heading"><div><h2 id="account-settings-title">Account preferences</h2><p>Set the name shown in your workspace.</p></div></div>
+      <label className="settings-name-field">Display name<input value={draft.displayName} maxLength={100} onChange={(event) => { setStatus(''); setDraft((current) => ({ ...current, displayName: event.target.value })) }} /></label>
+    </section>
+
+    <div className="settings-savebar">
+      <div aria-live="polite" className={statusIsError ? 'settings-status error' : 'settings-status'}>{status || (dirty ? 'Unsaved changes' : 'All changes saved')}</div>
+      <div><button type="button" className="secondary" disabled={!dirty || saving} onClick={cancelChanges}><X size={15} /> Cancel</button><button type="button" className="secondary" disabled={!dirty || saving} onClick={() => setConfirmReset(true)}><RotateCcw size={15} /> Reset all</button><button type="button" className="primary" disabled={!dirty || saving} onClick={() => void saveChanges()}><Save size={15} /> {saving ? 'Saving…' : 'Save changes'}</button></div>
+    </div>
+
+    {confirmReset && <div className="modal-backdrop settings-reset-backdrop"><section className="modal glass settings-reset-dialog" role="alertdialog" aria-modal="true" aria-labelledby="settings-reset-title" aria-describedby="settings-reset-description"><h2 id="settings-reset-title">Reset all customizations?</h2><p id="settings-reset-description">This restores the default font size, spacing, dashboard cards, workspace modules, and quick actions. Your financial data and display name will stay unchanged. Save the defaults to apply them.</p><div className="modal-actions"><button type="button" className="secondary" onClick={() => setConfirmReset(false)}>Keep my settings</button><button type="button" className="primary" onClick={restoreAll}>Restore defaults</button></div></section></div>}
   </section>
 }
 
@@ -443,12 +727,4 @@ const assetCategories = [
   ['vehicle', 'Vehicle'],
   ['gold_jewellery', 'Gold & jewellery'],
   ['other_valuables', 'Other valuables'],
-]
-const moduleNames = ['overview', 'transactions', 'budgets', 'savings', 'investments', 'assets', 'categories']
-const dashboardCards: Array<[string, string]> = [
-  ['cashFlow', 'Cash-flow chart'],
-  ['categories', 'Expense categories'],
-  ['savingsGoals', 'Savings-goal progress'],
-  ['investments', 'Investment contributions and holdings'],
-  ['netWorth', 'Estimated net worth'],
 ]

@@ -5,6 +5,8 @@ import './styles.css'
 import './finance.css'
 import './archive-trash.css'
 import './theme.css'
+import './mobile-ux.css'
+import './settings-personalization.css'
 import { ThemeProvider } from './theme'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
