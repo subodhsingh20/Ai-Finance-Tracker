@@ -1102,9 +1102,9 @@ export function Onboarding({ onComplete, onSignOut, error }: { onComplete: (data
     <label>Optional monthly overall budget (₹)<input name="monthly_budget" type="number" min="0" step="0.01" placeholder="Leave blank to skip" /></label>
     <label>Additional expense categories (comma separated)<input name="categories" placeholder="Pet care, Travel" /></label>
     <label>Income sources (comma separated)<input name="income_sources" placeholder="Salary, Freelance" /></label>
-    <label>Savings goals, one per line: name | target amount<textarea name="goals" rows={3} placeholder={'Emergency fund | 100000\nHoliday | 50000'} /></label>
-    <label>Assets, one per line: name | current value (₹)<textarea name="assets" rows={3} placeholder={'Bank savings | 25000\nGold | 40000'} /></label>
-    <label>Liabilities, one per line: name | category | balance (₹)<textarea name="liabilities" rows={3} placeholder={'Education loan | Loan | 50000'} /></label>
+    <label className="onboarding-wide">Savings goals, one per line: name | target amount<textarea name="goals" rows={3} placeholder={'Emergency fund | 100000\nHoliday | 50000'} /></label>
+    <label className="onboarding-wide">Assets, one per line: name | current value (₹)<textarea name="assets" rows={3} placeholder={'Bank savings | 25000\nGold | 40000'} /></label>
+    <label className="onboarding-wide">Liabilities, one per line: name | category | balance (₹)<textarea name="liabilities" rows={3} placeholder={'Education loan | Loan | 50000'} /></label>
     {(formError || error) && <p className="form-error" role="alert">{formError || error}</p>}
     <button className="primary full" disabled={saving}>{saving ? 'Preparing your workspace…' : 'Complete setup'}</button><button type="button" className="link-btn" onClick={onSignOut}>Sign out</button>
   </form></main>

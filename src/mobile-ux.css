@@ -19,6 +19,27 @@
 .workspace-page label, .onboarding-card label, .modal label, .login label { font-size: var(--type-form-label); }
 .recharts-cartesian-axis-tick-value { font-size: var(--type-chart-label) !important; }
 
+.onboarding-card { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.onboarding-card > .eyebrow,
+.onboarding-card > h1,
+.onboarding-card > p,
+.onboarding-card > fieldset,
+.onboarding-card > .onboarding-wide,
+.onboarding-card > .form-error,
+.onboarding-card > button { grid-column: 1 / -1; }
+.onboarding-card > label { min-width: 0; align-content: start; }
+.transaction-form label.transaction-field-type,
+.transaction-form label.transaction-field-category,
+.transaction-form label.transaction-field-source { grid-column: 1; }
+.transaction-form label.transaction-field-amount,
+.transaction-form label.transaction-field-date,
+.transaction-form label.transaction-field-merchant { grid-column: 2; }
+.transaction-form label.transaction-field-description,
+.transaction-form label.transaction-field-income-source,
+.transaction-form label.transaction-field-goal,
+.transaction-form .modal-actions,
+.transaction-form .form-error { grid-column: 1 / -1; }
+
 @media (max-width: 760px) {
   :root {
     --type-page-title: 24px;
@@ -171,4 +192,52 @@
 
 @media (prefers-reduced-motion: reduce) {
   .progress-fill { transition: none; }
+}
+
+/* Keep entry forms compact without shrinking controls below comfortable touch sizes. */
+@media (max-width: 560px) {
+  .filter-grid, .inline-form, .entity-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin-block: 13px;
+  }
+  .filter-grid > *, .inline-form > *, .entity-form > * { min-width: 0; }
+  .inline-form, .entity-form { padding: 12px; }
+  .inline-form > button, .entity-form > button { min-height: 44px; }
+
+  .transaction-modal { width: min(100%, 480px); max-height: calc(100dvh - 16px); padding: 15px; overflow-y: auto; }
+  .transaction-modal .modal-head { margin-bottom: 12px; }
+  .transaction-form { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .transaction-form .transaction-field-type { grid-column: 1; }
+  .transaction-form .transaction-field-amount { grid-column: 2; }
+  .transaction-form label.transaction-field-category { grid-column: 1; }
+  .transaction-form label.transaction-field-date { grid-column: 2; }
+  .transaction-form label.transaction-field-description,
+  .transaction-form label.transaction-field-income-source,
+  .transaction-form label.transaction-field-goal { grid-column: 1 / -1; }
+  .transaction-form label.transaction-field-source { grid-column: 1; }
+  .transaction-form label.transaction-field-merchant { grid-column: 2; }
+  .transaction-form label { min-width: 0; gap: 4px; }
+  .transaction-form .modal-actions, .transaction-form .form-error { grid-column: 1 / -1; }
+
+  .onboarding-card { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; }
+  .onboarding-card > .eyebrow,
+  .onboarding-card > h1,
+  .onboarding-card > p,
+  .onboarding-card > fieldset,
+  .onboarding-card > .onboarding-wide,
+  .onboarding-card > .form-error,
+  .onboarding-card > button { grid-column: 1 / -1; }
+  .onboarding-card > label { min-width: 0; align-content: start; }
+  .onboarding-card textarea { min-height: 72px; }
+  .ai-modal { gap: 10px; }
+  .ai-modal textarea { min-height: 84px; }
+}
+
+@media (max-width: 360px) {
+  .filter-grid, .inline-form, .entity-form { grid-template-columns: minmax(0, 1fr); }
+  .transaction-form label.transaction-field-category,
+  .transaction-form label.transaction-field-date { grid-column: 1 / -1; }
+  .onboarding-card { grid-template-columns: minmax(0, 1fr); }
+  .onboarding-card > * { grid-column: 1; }
 }
