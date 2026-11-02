@@ -1,0 +1,174 @@
+:root {
+  --type-page-title: 25px;
+  --type-section-title: 15px;
+  --type-financial: 21px;
+  --type-card-title: 10px;
+  --type-body: 14px;
+  --type-secondary: 11px;
+  --type-chart-label: 11px;
+  --type-button: 12px;
+  --type-form-label: 12px;
+}
+
+.page-heading h1 { font-size: var(--type-page-title); }
+.panel-header h2, .workspace-page h2 { font-size: var(--type-section-title); }
+.summary-amount, .networth-value { font-size: var(--type-financial); }
+.summary-top { font-size: var(--type-card-title); }
+.summary-note, .panel-header p, .workspace-page p { font-size: var(--type-secondary); }
+.primary, .secondary { font-size: var(--type-button); }
+.workspace-page label, .onboarding-card label, .modal label, .login label { font-size: var(--type-form-label); }
+.recharts-cartesian-axis-tick-value { font-size: var(--type-chart-label) !important; }
+
+@media (max-width: 760px) {
+  :root {
+    --type-page-title: 24px;
+    --type-section-title: 18px;
+    --type-financial: 21px;
+    --type-card-title: 14px;
+    --type-body: 15px;
+    --type-secondary: 12px;
+    --type-chart-label: 12px;
+    --type-button: 14px;
+    --type-form-label: 14px;
+  }
+
+  .content { width: 100%; min-width: 0; padding: 20px 14px 24px; }
+  .topbar { min-width: 0; padding-inline: 12px; gap: 8px; }
+  .top-actions { flex: 0 0 auto; gap: 6px; }
+  .top-actions > button { width: 44px; min-width: 44px; height: 44px; padding: 0; font-size: 0; }
+  .top-actions > button svg { width: 19px; height: 19px; }
+  .top-actions .month-select { display: none; }
+  .mobile-menu { width: 44px; height: 44px; margin-left: -6px; }
+  .breadcrumbs { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .page-heading { margin: 8px 0 20px; }
+  .page-heading h1 { font-size: var(--type-page-title); line-height: 1.2; overflow-wrap: anywhere; }
+  .page-heading p { font-size: var(--type-secondary); line-height: 1.55; }
+  .eyebrow { font-size: 10px; line-height: 1.4; }
+
+  .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .summary-card { min-width: 0; min-height: 112px; padding: 14px; container-type: inline-size; }
+  .summary-top { align-items: flex-start; gap: 8px; font-size: var(--type-card-title); line-height: 1.35; }
+  .summary-top > span:first-child { min-width: 0; }
+  .summary-icon { flex: 0 0 30px; width: 30px; height: 30px; }
+  .summary-amount { max-width: 100%; margin: 12px 0 4px; font-size: clamp(17px, 14cqi, 22px); line-height: 1.2; letter-spacing: -0.35px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .summary-note { font-size: var(--type-secondary); line-height: 1.4; }
+
+  .dashboard-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; margin-top: 12px; }
+  .panel { min-width: 0; padding: 17px; border-radius: 12px; }
+  .panel-header { min-width: 0; gap: 10px; }
+  .panel-header h2, .workspace-page h2 { font-size: var(--type-section-title); line-height: 1.3; }
+  .panel-header p { max-width: 42ch; font-size: var(--type-secondary); line-height: 1.5; }
+  .chart-panel, .budget-panel, .transactions-panel, .networth-panel { min-height: 0; }
+  .chart { height: 196px; margin: 10px -3px 0; }
+  .chart-legend { flex-wrap: wrap; gap: 12px 18px; margin-top: 16px; font-size: var(--type-secondary); }
+  .chart-legend span { min-height: 24px; }
+  .empty-budget { padding: 24px 10px 10px; }
+  .empty-budget b, .empty-transactions b { font-size: 14px; line-height: 1.4; }
+  .empty-budget p, .empty-transactions p { max-width: 34ch; font-size: var(--type-secondary); line-height: 1.55; }
+  .text-action, .link-btn { min-height: 44px; padding: 10px 8px; font-size: var(--type-button); }
+  .dashboard-list { gap: 8px; margin-top: 16px; }
+  .progress-item { min-width: 0; margin: 10px 0; }
+  .progress-caption { align-items: flex-start; font-size: var(--type-secondary); line-height: 1.45; }
+  .progress-caption > * { min-width: 0; overflow-wrap: anywhere; }
+  .progress-caption b { font-size: 14px; }
+  .progress-track { height: 9px; }
+  .budget-foot { flex-wrap: wrap; font-size: var(--type-secondary); line-height: 1.45; }
+
+  .category-chart { grid-template-columns: minmax(0, 1fr); gap: 12px; height: auto; }
+  .category-chart > div:first-child { width: 100%; height: 190px; min-width: 0; }
+  .category-legend { max-height: 240px; gap: 0; }
+  .category-legend > div { min-width: 0; min-height: 44px; padding: 7px 0; border-bottom: 1px solid var(--color-border); }
+  .category-legend span { min-width: 0; font-size: var(--type-secondary); line-height: 1.4; overflow-wrap: anywhere; }
+  .category-legend b { flex: 0 0 auto; max-width: 45%; font-size: var(--type-secondary); text-align: right; overflow-wrap: anywhere; }
+
+  .transaction-row { min-height: 58px; height: auto; padding: 8px 0; gap: 10px; }
+  .transaction-meta { gap: 5px; }
+  .transaction-meta b { font-size: 14px; line-height: 1.35; }
+  .transaction-meta span { font-size: var(--type-secondary); line-height: 1.4; }
+  .transaction-row strong { max-width: 42%; font-size: var(--type-secondary); text-align: right; overflow-wrap: anywhere; }
+  .networth-value { margin: 18px 0 16px; font-size: clamp(22px, 7vw, 30px); line-height: 1.2; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+  .valuation-list { gap: 0; }
+  .valuation-list > div { min-width: 0; min-height: 44px; gap: 8px; font-size: var(--type-secondary); line-height: 1.4; }
+  .valuation-list > div > * { min-width: 0; overflow-wrap: anywhere; }
+  .valuation-list b { max-width: 48%; text-align: right; font-size: var(--type-secondary); }
+  .disclaimer { font-size: var(--type-secondary); line-height: 1.5; }
+
+  .footer { align-items: flex-start; flex-wrap: wrap; gap: 8px 16px; font-size: var(--type-secondary); line-height: 1.45; }
+  .footer span { min-width: 0; }
+}
+
+@media (max-width: 560px) {
+  .breadcrumbs { display: none; }
+  .topbar { justify-content: space-between; }
+  .page-heading { display: block; }
+  .page-heading p { max-width: 38ch; }
+  .appearance-section { padding: 15px; }
+  .appearance-heading { display: grid; gap: 8px; }
+  .appearance-heading h2 { font-size: var(--type-section-title); }
+  .appearance-heading p { font-size: var(--type-secondary); line-height: 1.5; }
+  .current-theme { font-size: var(--type-secondary); }
+  .theme-options { grid-template-columns: minmax(0, 1fr); gap: 9px; }
+  .theme-option { min-height: 72px; padding: 12px; }
+  .theme-option-copy strong { font-size: 14px; }
+  .theme-option-copy small { font-size: var(--type-secondary); }
+
+  .workspace-page { padding: 16px; }
+  .workspace-page p, .panel-header p { font-size: var(--type-secondary); }
+  .workspace-page label, .onboarding-card label, .modal label, .login label { font-size: var(--type-form-label); line-height: 1.4; }
+  .workspace-page input, .workspace-page select, .workspace-page textarea,
+  .onboarding-card input, .onboarding-card textarea, .proposal-preview input,
+  .proposal-preview select, .ai-modal textarea, .login input { min-height: 44px; font-size: 16px; }
+  .filter-grid, .inline-form, .entity-form { grid-template-columns: minmax(0, 1fr); }
+  .settings-form { max-width: none; gap: 16px; }
+  .settings-form fieldset { min-width: 0; gap: 4px; padding: 12px; }
+  .settings-form legend { font-size: 14px; }
+  .settings-form fieldset label.checkbox-label { min-width: 0; min-height: 44px; padding: 7px 4px; font-size: 14px !important; line-height: 1.35; }
+  .settings-form fieldset .checkbox-label input { flex: 0 0 20px; width: 20px !important; min-height: 20px !important; height: 20px; }
+  .settings-form > .primary { min-height: 48px; font-size: var(--type-button); }
+  .table-actions { font-size: var(--type-secondary); }
+  .table-actions > div { gap: 8px; }
+  .table-actions button, .row-actions button, .archive-trash-actions button { min-height: 44px; }
+  .table-scroll { max-width: 100%; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; }
+  .table-scroll th, .table-scroll td { padding: 12px 10px; font-size: var(--type-secondary); }
+  .archive-trash-page { padding: 16px; }
+  .archive-trash-tabs { width: 100%; }
+  .archive-trash-tabs button { flex: 1; justify-content: center; min-height: 48px; padding-inline: 8px; font-size: var(--type-button); }
+  .archive-trash-record-title b { font-size: 14px; line-height: 1.4; }
+  .archive-trash-record-title span, .archive-trash-record-details { font-size: var(--type-secondary); line-height: 1.45; }
+  .archive-trash-empty b { font-size: 15px; }
+  .archive-trash-empty p { font-size: var(--type-secondary); line-height: 1.5; }
+  .archive-trash-confirm { width: min(100%, 440px); max-height: calc(100dvh - 24px); overflow-y: auto; }
+  .modal-backdrop { padding: 12px; }
+  .modal { max-height: calc(100dvh - 24px); overflow-y: auto; padding: 17px; }
+  .modal-head h2 { font-size: 18px; line-height: 1.35; }
+  .transaction-form { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .transaction-form label:nth-child(n) { grid-column: 1; }
+  .transaction-form input, .transaction-form select { min-height: 44px; height: auto; font-size: 16px; }
+  .modal-actions { grid-column: 1; flex-wrap: wrap; }
+  .modal-actions > button { min-height: 44px; flex: 1 1 120px; font-size: var(--type-button); }
+  .proposal-row, .side-by-side { grid-template-columns: minmax(0, 1fr); }
+  .ai-dialog { width: calc(100vw - 24px); max-height: calc(100dvh - 24px); overflow-y: auto; }
+  .toast { width: calc(100vw - 24px); justify-content: center; text-align: center; font-size: var(--type-secondary); }
+}
+
+@media (max-width: 360px) {
+  .content { padding-inline: 12px; }
+  .summary-grid { grid-template-columns: minmax(0, 1fr); gap: 9px; }
+  .summary-card { min-height: 104px; padding: 14px 16px; }
+  .summary-amount { font-size: clamp(19px, 7vw, 22px); }
+  .panel { padding: 15px; }
+  .top-actions { gap: 4px; }
+  .top-actions > button { width: 42px; min-width: 42px; }
+}
+
+@media (min-width: 761px) and (max-width: 1100px) {
+  .dashboard-grid { grid-template-columns: minmax(0, 1.25fr) minmax(250px, 0.85fr); }
+}
+
+@media (min-width: 761px) and (max-width: 900px) {
+  .dashboard-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progress-fill { transition: none; }
+}

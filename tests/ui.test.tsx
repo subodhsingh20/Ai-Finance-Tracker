@@ -166,6 +166,124 @@ describe('Friday theme preferences', () => {
   })
 })
 
+describe('workspace personalization', () => {
+  it('renders safe defaults when stored account preferences are missing or malformed', () => {
+    render(<ThemeProvider><FinancePages
+      {...pageProps}
+      page="Settings"
+      profile={{
+        display_name: null,
+        enabled_modules: null as unknown as string[],
+        dashboard_preferences: null as unknown as Record<string, unknown>,
+      }}
+    /></ThemeProvider>)
+
+    expect(screen.getByRole('heading', { name: 'Settings' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /medium.*default/i })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('checkbox', { name: 'Income this month' })).toBeChecked()
+  })
+
+  it('previews appearance changes and saves dashboard visibility and order together', async () => {
+    const user = userEvent.setup()
+    const saveProfile = vi.fn(noAction)
+    const onDirtyChange = vi.fn()
+    render(<ThemeProvider><FinancePages {...pageProps} page="Settings" onSaveProfile={saveProfile} onSettingsDirtyChange={onDirtyChange} /></ThemeProvider>)
+
+    expect(screen.getByRole('heading', { name: 'Customize Dashboard' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /medium.*default/i })).toHaveAttribute('aria-pressed', 'true')
+    await user.click(screen.getByRole('button', { name: 'Large' }))
+    expect(document.documentElement).toHaveAttribute('data-font-scale', 'large')
+
+    await user.click(screen.getByRole('checkbox', { name: 'Income this month' }))
+    await user.click(screen.getByRole('button', { name: 'Move Savings goals up' }))
+    expect(screen.getByRole('checkbox', { name: 'Income this month' })).not.toBeChecked()
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+
+    await waitFor(() => expect(saveProfile).toHaveBeenCalledOnce())
+    expect(saveProfile).toHaveBeenCalledWith('', expect.arrayContaining(['overview']), expect.objectContaining({
+      fontScale: 'large',
+      income: false,
+      dashboardOrder: expect.arrayContaining(['savingsGoals', 'income']),
+    }))
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false)
+  })
+
+  it('keeps Overview and Settings available while saving optional module and quick action choices', async () => {
+    const user = userEvent.setup()
+    const saveProfile = vi.fn(noAction)
+    render(<ThemeProvider><FinancePages
+      {...pageProps}
+      page="Settings"
+      profile={{ display_name: 'Ari', enabled_modules: ['overview', 'transactions'], dashboard_preferences: { modulePreferencesSaved: true } }}
+      onSaveProfile={saveProfile}
+    /></ThemeProvider>)
+
+    expect(screen.getByText('Overview')).toBeInTheDocument()
+    expect(screen.queryByRole('checkbox', { name: /overview/i })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('checkbox', { name: 'Transactions' }))
+    await user.click(screen.getByRole('checkbox', { name: 'Add savings contribution' }))
+    await user.click(screen.getByRole('button', { name: 'Move Add income down' }))
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+
+    await waitFor(() => expect(saveProfile).toHaveBeenCalledOnce())
+    const [, modules, preferences] = saveProfile.mock.calls[0]
+    expect(modules).toContain('overview')
+    expect(modules).not.toContain('transactions')
+    expect(preferences).toMatchObject({ modulePreferencesSaved: true, quickActions: expect.arrayContaining(['addSavings']) })
+  })
+
+  it('confirms a full reset and previews an empty dashboard arrangement', async () => {
+    const user = userEvent.setup()
+    render(<ThemeProvider><FinancePages {...pageProps} page="Settings" /></ThemeProvider>)
+
+    const dashboardControls = within(screen.getByRole('list', { name: 'Dashboard cards' }))
+    for (const name of ['Income this month', 'Expenses this month', 'Cash flow', 'Monthly budget', 'Expense categories', 'Savings goals', 'Investments', 'Net worth', 'Recent transactions']) {
+      await user.click(dashboardControls.getByRole('checkbox', { name }))
+    }
+    expect(screen.getByText('No dashboard cards selected')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Reset all' }))
+    expect(screen.getByRole('alertdialog')).toHaveTextContent('Your financial data and display name will stay unchanged')
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Restore defaults' }))
+    expect(screen.queryByText('No dashboard cards selected')).not.toBeInTheDocument()
+    expect(document.documentElement).toHaveAttribute('data-font-scale', 'medium')
+  })
+})
+
+describe('period comparison reports', () => {
+  it('compares selected months and excludes deleted transactions', async () => {
+    const user = userEvent.setup()
+    const rows: TransactionRow[] = [
+      transaction,
+      { ...transaction, id: 'transaction-income', type: 'income', amount: 2000, description: 'Salary', occurred_on: '2026-10-03', category_id: 'salary', categories: { name: 'Salary' } },
+      { ...transaction, id: 'transaction-previous', amount: 100, occurred_on: '2026-09-10' },
+      { ...transaction, id: 'transaction-deleted', amount: 900, deleted_at: '2026-10-20T00:00:00Z' },
+    ]
+    render(<FinancePages {...pageProps} page="Reports" transactions={rows} />)
+    await user.clear(screen.getByLabelText('Selected month'))
+    await user.type(screen.getByLabelText('Selected month'), '2026-10')
+
+    expect(screen.getByRole('heading', { name: 'October 2026' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'September 2026' })).toBeInTheDocument()
+    expect(screen.getByText('₹2,000.00')).toBeInTheDocument()
+    expect(screen.getByRole('table')).toHaveTextContent('Food')
+    expect(screen.getByRole('table')).toHaveTextContent('₹125.00')
+    expect(screen.getByRole('table')).toHaveTextContent('₹100.00')
+    expect(screen.getByRole('table')).not.toHaveTextContent('₹900.00')
+  })
+
+  it('compares years and shows an empty state when both periods lack entries', async () => {
+    const user = userEvent.setup()
+    render(<FinancePages {...pageProps} page="Reports" transactions={[]} />)
+    await user.selectOptions(screen.getByLabelText('Compare by'), 'year')
+    await user.clear(screen.getByLabelText('Selected year'))
+    await user.type(screen.getByLabelText('Selected year'), '2026')
+
+    expect(screen.getByRole('heading', { name: '2026' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '2025' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'No transactions in these periods' })).toBeInTheDocument()
+  })
+})
+
 describe('manual finance forms', () => {
   it('creates a transaction only after the manual form is submitted', async () => {
     const onSave = vi.fn(noAction)
